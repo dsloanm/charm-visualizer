@@ -1,0 +1,156 @@
+# Copyright 2025-2026 Vantage Compute Corporation
+# Copyright 2020-2024 Omnivector, LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: slurmd
+summary: |
+  Slurmd, the compute node daemon of Slurm.
+description: |
+  This charm provides slurmd and the bindings to other utilities
+  that make lifecycle operations a breeze.
+
+  slurmd is the compute node daemon of SLURM. It monitors all tasks running
+  on the compute node, accepts work (tasks), launches tasks, and kills
+  running tasks upon request.
+links:
+  contact: https://matrix.to/#/#hpc:ubuntu.com
+  issues:
+    - https://github.com/canonical/slurm-charms/issues
+  source:
+    - https://github.com/canonical/slurm-charms
+
+assumes:
+  - juju
+
+type: charm
+base: ubuntu@24.04
+platforms:
+  amd64:
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+    build-packages:
+      # Required to build `python-apt` and `ubuntu-drivers-common`.
+      - git
+      - libapt-pkg-dev
+      - libdrm-dev
+      - libkmod-dev
+      - libpci-dev
+      - pkgconf
+    override-build: |
+      # Regenerate lockfile to use vendored subpackages from `slurm-charms`.
+      uv lock
+      craftctl default
+    build-environment:
+      - UV_FROZEN: "false"  # Allow lockfile to be updated in `override-build`.
+
+provides:
+  metrics-endpoint:
+    description: |
+      Provides application metrics to COS Prometheus instance.
+    interface: prometheus_scrape
+    optional: true
+  slurmctld:
+    interface: slurmd
+    limit: 1
+
+config:
+  options:
+    default-node-state:
+      type: string
+      description: |
+        Default state to start newly deployed compute nodes in.
+
+        Valid states are:
+
+        - down
+        - idle
+
+        Deployed slurmd applications will block if an invalid state
+        is configured.
+      default: "down"
+
+    default-node-reason:
+      type: string
+      description: |
+        Default reason to provide for the state of newly deployed compute nodes.
+
+        Configured value will be ignored if the default node state is "idle".
+      default: ""
+
+    partition-config:
+      type: string
+      default: ""
+      description: >
+        Additional partition configuration parameters, specified as a space separated `key=value`
+        in a single line. Find a list of all possible partition configuration parameters
+        [here](https://slurm.schedmd.com/slurm.conf.html#SECTION_PARTITION-CONFIGURATION).
+
+
+        Example usage:
+        ```bash
+         $ juju config slurmd partition-config="DefaultTime=45:00 MaxTime=1:00:00"
+        ```
+
+actions:
+  set-node-config:
+    description: |
+      Set a custom configuration for the node.
+
+      For example, to set a custom weight for the node, run:
+
+      ```shell
+      juju run slurmd/0 set-node-config parameters="weight=200"
+      ```
+
+      To reset the applied custom configuration, run:
+
+      ```shell
+      juju run slurmd/0 set-node-config reset=true
+      ```
+    params:
+      parameters:
+        type: string
+        description: |
+          Node configuration parameters.
+
+          See the "Node configuration" of the slurm.conf manpage for a full
+          description of each option: https://slurm.schedmd.com/slurm.conf.html#SECTION_NODE-CONFIGURATION
+
+          The following charm-managed parameters cannot be set using this action:
+
+          - NodeName
+          - NodeAddr
+          - NodeHostname
+          - State
+          - Reason
+          - Port
+        default: ""
+
+      reset:
+        type: boolean
+        description: |
+          If true, reset the node to its base configuration set by `slurmd -C`.
+
+          This parameter can be used with the `parameters` parameter to replace the existing
+          custom node configuration with a new custom configuration:
+
+          ```shell
+          juju run slurmd/0 set-node-config parameters="weight=100" reset=true
+          ```
+        default: false

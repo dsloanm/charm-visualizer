@@ -1,0 +1,46 @@
+# Copyright 2020-2024 Omnivector, LLC.
+# See LICENSE file for licensing details.
+
+name: slurmrestd
+summary: |
+  Interface to Slurm via REST API.
+description: |
+  This charm provides slurmrestd and the bindings to other utilities
+  that make lifecycle operations a breeze.
+
+  slurmrestd is a REST API interface for SLURM.
+
+links:
+  contact: https://matrix.to/#/#hpc:ubuntu.com
+
+  issues:
+    - https://github.com/canonical/slurm-charms/issues
+
+  source:
+    - https://github.com/canonical/slurm-charms
+
+assumes:
+  - juju
+
+type: charm
+base: ubuntu@24.04
+platforms:
+  amd64:
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+    override-build: |
+      # Regenerate lockfile to use vendored subpackages from `slurm-charms`.
+      uv lock
+      craftctl default
+    build-environment:
+      - UV_FROZEN: "false"  # Allow lockfile to be updated in `override-build`.
+
+provides:
+  slurmctld:
+    interface: slurmrestd
+    limit: 1

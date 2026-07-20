@@ -1,0 +1,65 @@
+# Copyright 2024-2025 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: filesystem-client
+
+type: charm
+
+title: Filesystem Client
+
+summary: Mount filesystems on machine charms.
+
+description: |
+  Mount filesystems on machine charms.
+
+  Enables access to exported filesystems.
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+
+parts:
+  charm: {}
+
+subordinate: true
+
+requires:
+  filesystem:
+    interface: filesystem_info
+    limit: 1
+  mount:
+    interface: mount_info
+    scope: container
+  juju-info:
+    interface: juju-info
+    scope: container
+
+config:
+  options:
+    mountpoint:
+      description: Location to mount the filesystem on the machine.
+      type: string
+    noexec:
+      default: false
+      description: |
+        Block execution of binaries on the filesystem.
+      type: boolean
+    nosuid:
+      default: false
+      description: |
+        Do not honor suid and sgid bits on the filesystem.
+      type: boolean
+    nodev:
+      default: false
+      description: |
+        Blocking interpretation of character and/or block
+        devices on the filesystem.
+      type: boolean
+    read-only:
+      default: false
+      description: Mount filesystem as read-only.
+      type: boolean
+    enable-lustre:
+      default: false
+      description: Enable support for mounting Lustre filesystems.
+      type: boolean

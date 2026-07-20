@@ -1,0 +1,204 @@
+# Copyright 2025-2026 Vantage Compute Corporation
+# Copyright 2020-2024 Omnivector, LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: slurmctld
+summary: |
+  Slurmctld, the central management daemon of Slurm.
+description: |
+  This charm provides slurmctld and the bindings to other utilities
+  that make lifecycle operations a breeze.
+
+  slurmctld is the central management daemon of SLURM. It monitors all other
+  SLURM daemons and resources, accepts work (jobs), and allocates resources
+  to those jobs.  Given the critical functionality of slurmctld, there may be
+  a backup server to assume these functions in the event that the primary
+  server fails.
+
+links:
+  contact: https://matrix.to/#/#hpc:ubuntu.com
+  issues:
+    - https://github.com/canonical/slurm-charms/issues
+  source:
+    - https://github.com/canonical/slurm-charms
+
+requires:
+  slurmd:
+    interface: slurmd
+  slurmdbd:
+    interface: slurmdbd
+  slurmrestd:
+    interface: slurmrestd
+  sackd:
+    interface: sackd
+  influxdb:
+    interface: influxdb-api
+  oci-runtime:
+    interface: slurm-oci-runtime
+  smtp:
+    interface: smtp
+    limit: 1
+
+provides:
+  cos-agent:
+    interface: cos_agent
+    limit: 1
+  mount:
+    interface: mount_info
+    scope: container
+
+peers:
+  slurmctld-peer:
+    interface: slurmctld-peer
+
+assumes:
+  - juju
+
+type: charm
+base: ubuntu@24.04
+platforms:
+  amd64:
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+    override-build: |
+      # Regenerate lockfile to use vendored subpackages from `slurm-charms`.
+      uv lock
+      craftctl default
+    build-environment:
+      - UV_FROZEN: "false"  # Allow lockfile to be updated in `override-build`.
+
+config:
+  options:
+    cluster-name:
+      type: string
+      default: ""
+      description: |
+        Name to be recorded in database for jobs from this cluster.
+
+        This is important if a single database is used to record information from
+        multiple Slurm-managed clusters.
+
+    default-partition:
+      type: string
+      default: ""
+      description: |
+        Default Slurm partition. This is only used if defined, and must match an
+        existing partition.
+
+    slurm-conf-parameters:
+      type: string
+      default: ""
+      description: |
+        User supplied Slurm configuration as a multiline string.
+
+        Example usage:
+        $ juju config slurmcltd slurm-conf-parameters="$(cat additional.conf)"
+
+    cgroup-parameters:
+      type: string
+      default: ""
+      description: |
+        User supplied configuration for `cgroup.conf`.
+
+    email-from-name:
+      default: "Charmed HPC Admin"
+      type: string
+      description: |
+        Name to appear in the signature of email notifications sent by Slurm.
+
+        Corresponds to the `emailFromName` parameter used in the Slurm-Mail project. See:
+        https://github.com/neilmunday/slurm-mail/blob/v4.31/etc/slurm-mail/slurm-mail.conf#L16
+
+actions:
+  rotate-auth-key:
+    description: |
+      Perform a cluster-wide rotation of the key used to authenticate Slurm remote procedure calls.
+      See: https://documentation.ubuntu.com/charmed-hpc/latest/explanation/key-rotation/#authentication-key-rotation-process
+
+      Example usage:
+
+      ```bash
+      juju run slurmctld/leader rotate-auth-key
+      ```
+
+  rotate-jwt-key:
+    description: |
+      Perform a rotation of the JSON Web Tokens (JWT) key alternative authentication mechanism.
+      See: https://documentation.ubuntu.com/charmed-hpc/latest/explanation/key-rotation/#jwt-key-rotation-process
+
+      Example usage:
+
+      ```bash
+      juju run slurmctld/leader rotate-jwt-key
+      ```
+
+  show-current-config:
+    description: |
+      Display the currently used `slurm.conf`.
+
+      Example usage:
+
+      ```bash
+      juju run slurmctld/leader show-current-config \
+          --quiet --format=json  | jq .[].results.slurm.conf | xargs -I % -0 python3 -c 'print(%)'
+      ```
+
+  set-node-state:
+    description: |
+      Set the state of the provided nodes so that new jobs can be scheduled..
+
+      **Examples:**
+
+      Set the state of nodes 0 to 19 to idle:
+
+      ```shell
+      $ juju run slurmctld/leader set-node-state nodes='node-[0-19]' state=idle
+      ```
+
+      Drain nodes 20 to 24 to prevent new jobs from being scheduled while
+      performing routine maintenance:
+
+      ```shell
+      $ juju run slurmctld/leader set-node-state nodes='node[20-24]' state=drain reason="Maintenance"
+      ```
+    params:
+      nodes:
+        type: string
+        description: |
+          Node(s) to update the state of, using the Slurm node name format.
+          For example, `'node-[1,2]'`.
+      state:
+        type: string
+        description: State to set for the node(s).
+        enum:
+          - idle
+          - down
+          - drain
+          - fail
+          - failing
+      reason:
+        type: string
+        description: |
+          The reason for the node(s) to be in state "down", "drain", "fail", or "failing".
+
+          This parameter is not required if setting the node(s) state to "idle"
+        default: ""
+    required:
+      - nodes
+      - state

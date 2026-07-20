@@ -1,0 +1,54 @@
+name: sackd
+type: charm
+
+summary: |
+  Sackd, the login node daemon of Slurm.
+
+description: |
+  This charm provides sackd to facilitate deployment of a login node for a
+  Slurm cluster.
+
+  sackd is the login node daemon of Slurm. It enables authentication to the
+  cluster and retrieval of configuration files when running in configless
+  mode.
+
+links:
+  contact: https://matrix.to/#/#hpc:ubuntu.com
+
+  issues:
+    - https://github.com/canonical/slurm-charms/issues
+
+  source:
+    - https://github.com/canonical/slurm-charms
+
+assumes:
+  - juju
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+    build-on: amd64
+    build-for: amd64
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+    override-build: |
+      # Regenerate lockfile to use vendored subpackages from `slurm-charms`.
+      uv lock
+      craftctl default
+    build-environment:
+      - UV_FROZEN: "false"  # Allow lockfile to be updated in `override-build`.
+
+provides:
+  metrics-endpoint:
+    description: |
+      Provides application metrics to COS Prometheus instance.
+    interface: prometheus_scrape
+    optional: true
+  slurmctld:
+    interface: sackd
+    limit: 1
