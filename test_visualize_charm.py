@@ -7,8 +7,13 @@ import visualize_charm as visualizer
 SAMPLE_CHARMS = Path(__file__).parent / "sample-charms"
 
 
-def _charm(name, requires=None, provides=None, peers=None):
-    """Build a minimal CharmModel with the given relations."""
+def _charm(name, requires=None, provides=None, peers=None, subordinate=False, scopes=None):
+    """Build a minimal CharmModel with the given relations.
+
+    ``scopes`` optionally maps endpoint names to a relation scope (e.g.
+    ``"container"``); endpoints not listed default to ``None``.
+    """
+    scopes = scopes or {}
     relations = []
     for role, section in (
         ("requires", requires or {}),
@@ -22,7 +27,7 @@ def _charm(name, requires=None, provides=None, peers=None):
                     "role": role,
                     "interface": interface,
                     "limit": None,
-                    "scope": None,
+                    "scope": scopes.get(endpoint),
                     "optional": False,
                 }
             )
@@ -30,8 +35,9 @@ def _charm(name, requires=None, provides=None, peers=None):
         name=name,
         summary="",
         description="",
+        subordinate=subordinate,
         relations=relations,
-        stats={"relations": len(relations)},
+        stats={"relations": len(relations), "subordinate": subordinate},
     )
 
 
@@ -103,12 +109,50 @@ class CombinedGraphTests(unittest.TestCase):
         self.assertIn('id="charm-toggles"', rendered)
         self.assertIn("toggleCharm", rendered)
 
+    def test_rendered_html_contains_charm_search(self):
+        rendered = visualizer._render_html(self.graph, "Sample charms")
+
+        self.assertIn('id="charm-search"', rendered)
+        self.assertIn('placeholder="Filter charms', rendered)
+        self.assertIn("filterCharms", rendered)
+        self.assertIn(".charm-search", rendered)
+
+    def test_export_svg_xml_declaration_is_single_line(self):
+        """Regression: the inline JS must not contain a literal newline inside
+        the single-quoted <?xml ...?> string in exportSVG(), otherwise the
+        whole <script> fails to parse and no charms render."""
+        rendered = visualizer._render_html(self.graph, "Sample charms")
+        import re
+        self.assertTrue(
+            re.search(r"<\?xml version=.1\.0. encoding=.UTF-8.\?>\\n'", rendered),
+            "exportSVG xml declaration should use a JS escape (\\n), not a literal newline",
+        )
+
     def test_rendered_html_contains_hide_unconnected_toggle(self):
         rendered = visualizer._render_html(self.graph, "Sample charms")
 
         self.assertIn('id="btn-hide-unconnected"', rendered)
         self.assertIn("hideUnconnected", rendered)
         self.assertIn("relationConnected", rendered)
+
+    def test_rendered_html_contains_export_buttons(self):
+        rendered = visualizer._render_html(self.graph, "Sample charms")
+
+        for btn in ("btn-export-svg", "btn-export-png", "btn-export-json"):
+            self.assertIn(f'id="{btn}"', rendered)
+        self.assertIn("exportSVG", rendered)
+        self.assertIn("exportPNG", rendered)
+        self.assertIn("exportJSON", rendered)
+
+    def test_rendered_html_contains_export_helpers(self):
+        rendered = visualizer._render_html(self.graph, "Sample charms")
+
+        # Core building blocks for in-browser export are present.
+        self.assertIn("buildExportSVG", rendered)
+        self.assertIn("inlineSvgStyles", rendered)
+        self.assertIn("downloadBlob", rendered)
+        self.assertIn("XMLSerializer", rendered)
+        self.assertIn("toBlob", rendered)
 
     def test_unconnected_relation_has_no_integration_link(self):
         lone = _charm("solo", requires={"db": "mysql"})
@@ -221,6 +265,124 @@ class FormatRenderTests(unittest.TestCase):
             out = visualizer.render(self.pair, "pair", fmt=fmt)
             self.assertIsInstance(out, str)
             self.assertTrue(out)
+
+
+class SubordinateTests(unittest.TestCase):
+    """Tests for subordinate charm visualization across formats."""
+
+    @classmethod
+    def setUpClass(cls):
+        # A subordinate charm (filesystem-client style) with a container-scope
+        # relation, and a principal charm it integrates with.
+        cls.subordinate = _charm(
+            "filesystem-client",
+            requires={"filesystem": "filesystem_info"},
+            subordinate=True,
+            scopes={"filesystem": "container"},
+        )
+        cls.principal = _charm(
+            "lustre-server",
+            provides={"filesystem": "filesystem_info"},
+        )
+        cls.models = [cls.subordinate, cls.principal]
+        cls.graph = visualizer.build_combined_graph(cls.models)
+
+    def test_inspect_charm_reads_subordinate_flag(self):
+        from pathlib import Path
+        fc_dir = SAMPLE_CHARMS / "filesystem-charms" / "filesystem-client"
+        model = visualizer.inspect_charm(fc_dir)
+        self.assertTrue(model["subordinate"])
+        self.assertTrue(model["stats"]["subordinate"])
+        # A non-subordinate charm is False, not missing.
+        ls_dir = SAMPLE_CHARMS / "filesystem-charms" / "lustre-server"
+        ls_model = visualizer.inspect_charm(ls_dir)
+        self.assertFalse(ls_model["subordinate"])
+
+    def test_charm_node_carries_subordinate_flag(self):
+        charm_nodes = [n for n in self.graph["nodes"] if n["type"] == "charm"]
+        sub = next(n for n in charm_nodes if n["name"] == "filesystem-client")
+        prin = next(n for n in charm_nodes if n["name"] == "lustre-server")
+        self.assertTrue(sub["subordinate"])
+        self.assertFalse(prin["subordinate"])
+
+    def test_relation_links_carry_scope(self):
+        rel_links = [l for l in self.graph["links"] if l["kind"] == "relation"]
+        # The filesystem relation on the subordinate has scope=container.
+        fs_link = next(
+            l for l in rel_links
+            if "filesystem" in l["target"] and l.get("scope") == "container"
+        )
+        self.assertEqual(fs_link.get("scope"), "container")
+        # Other relation links have scope=None.
+        non_container = [
+            l for l in rel_links if l.get("scope") != "container"
+        ]
+        self.assertTrue(non_container)
+
+    def test_html_renders_subordinate_marker_and_container_edge(self):
+        html = visualizer.render(self.models, "sub", fmt="html")
+        # Legend entry
+        self.assertIn("Subordinate charm", html)
+        self.assertIn("container-scope relation", html)
+        # CSS for dashed subordinate ring and container link
+        self.assertIn("subordinate-ring", html)
+        self.assertIn("link.relation.container", html)
+        # JS sublabel branch
+        self.assertIn('"subordinate"', html)
+        # Help text
+        self.assertIn("Subordinate charms", html)
+
+    def test_dot_marks_subordinate_node_and_container_edge(self):
+        out = visualizer.render(self.models, "sub", fmt="dot")
+        # Subordinate charm node uses dashed style.
+        self.assertIn("filled,dashed", out)
+        # Container-scope relation edge uses dashed style.
+        self.assertIn('style="dashed"', out)
+
+    def test_mermaid_marks_subordinate_node_and_container_edge(self):
+        out = visualizer.render(self.models, "sub", fmt="mermaid")
+        # Subordinate node class and dashed border classDef.
+        self.assertIn(":::subordinate", out)
+        self.assertIn("stroke-dasharray: 4 3", out)
+        # Container-scope edge is dotted with a label.
+        self.assertIn("-.->|container|", out)
+        # linkStyle override for container edges.
+        self.assertIn("stroke-dasharray: 5 4", out)
+
+    def test_svg_marks_subordinate_node_and_container_edge(self):
+        import xml.etree.ElementTree as ET
+        out = visualizer.render(self.models, "sub", fmt="svg")
+        root = ET.fromstring(out)
+        # Subordinate charm node has a dashed circle (stroke-dasharray attribute).
+        circles = root.findall(".//{http://www.w3.org/2000/svg}circle")
+        dashed_circles = [
+            c for c in circles if c.get("stroke-dasharray") == "4 3"
+        ]
+        self.assertTrue(dashed_circles, "no dashed circles for subordinate charm")
+        # "subordinate" sublabel text is present.
+        texts = root.findall(".//{http://www.w3.org/2000/svg}text")
+        sub_labels = [t for t in texts if t.text == "subordinate"]
+        self.assertTrue(sub_labels)
+        # Container-scope line is dashed.
+        lines = root.findall(".//{http://www.w3.org/2000/svg}line")
+        dashed_lines = [
+            l for l in lines if l.get("stroke-dasharray") == "5 4"
+        ]
+        self.assertTrue(dashed_lines, "no dashed lines for container-scope relations")
+
+    def test_json_carries_subordinate_and_scope(self):
+        import json as _json
+        out = visualizer.render(self.models, "sub", fmt="json")
+        payload = _json.loads(out)
+        charm_nodes = [n for n in payload["nodes"] if n["type"] == "charm"]
+        sub = next(n for n in charm_nodes if n["name"] == "filesystem-client")
+        self.assertTrue(sub["subordinate"])
+        rel_links = [l for l in payload["links"] if l["kind"] == "relation"]
+        fs_link = next(
+            l for l in rel_links
+            if "filesystem" in l["target"] and l.get("scope") == "container"
+        )
+        self.assertEqual(fs_link.get("scope"), "container")
 
 
 if __name__ == "__main__":

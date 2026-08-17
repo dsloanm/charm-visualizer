@@ -157,15 +157,20 @@ def inspect_charm(charm_dir: Path) -> CharmModel:
     name = metadata.get("name") or charm_dir.name
     summary = (metadata.get("summary") or "").strip()
     description = (metadata.get("description") or "").strip()
+    subordinate = bool(metadata.get("subordinate", False))
     relations = _build_relations(metadata)
 
     model = CharmModel(
         name=name,
         summary=summary,
         description=description,
+        subordinate=subordinate,
         meta_path=metadata.pop("_meta_path", None),
         relations=relations,
-        stats={"relations": len(relations)},
+        stats={
+            "relations": len(relations),
+            "subordinate": subordinate,
+        },
     )
     return model
 
@@ -204,6 +209,7 @@ def build_graph(model: CharmModel) -> dict:
             "name": model["name"],
             "summary": model["summary"],
             "description": model["description"],
+            "subordinate": model.get("subordinate", False),
             "relations": model["relations"],
             "stats": model["stats"],
         }
@@ -225,7 +231,7 @@ def build_graph(model: CharmModel) -> dict:
                 "optional": rel["optional"],
             }
         )
-        links.append({"source": "charm", "target": rid, "kind": "relation", "role": rel["role"]})
+        links.append({"source": "charm", "target": rid, "kind": "relation", "role": rel["role"], "scope": rel.get("scope")})
 
     return {"nodes": nodes, "links": links, "charm": model, "charms": [model]}
 
@@ -258,6 +264,7 @@ def build_combined_graph(models: list[CharmModel]) -> dict:
                     "target": idmap[l["target"]],
                     "kind": l["kind"],
                     "role": l.get("role"),
+                    "scope": l.get("scope"),
                 }
             )
         # offset cluster in x so they don't fully overlap
@@ -399,6 +406,14 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
 
   /* Charm visibility toggles */
   .charm-toggles { max-height: 40vh; overflow-y: auto; min-width: 180px; }
+  .charm-search {
+    width: 100%; box-sizing: border-box; margin-bottom: 6px;
+    background: rgba(13,27,42,0.6); border: 1px solid var(--panel-border);
+    border-radius: 6px; padding: 5px 8px; color: var(--text);
+    font-size: 12px; font-family: inherit;
+  }
+  .charm-search::placeholder { color: var(--text-dim); }
+  .charm-search:focus { outline: none; border-color: var(--accent); }
   .toggle-row {
     display: flex; align-items: center; gap: 8px; margin: 4px 0;
     cursor: pointer; user-select: none;
@@ -448,7 +463,9 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
   .node-sub { fill: var(--text-dim); font-size: 10px; }
   .link { stroke-opacity: 0.5; fill: none; }
   .link.relation { stroke: #3a5a7a; stroke-width: 2; }
+  .link.relation.container { stroke-dasharray: 5 4; }
   .link.integration { stroke: #ffd166; stroke-width: 3; stroke-opacity: 0.7; }
+  .subordinate-ring { fill: none; stroke-dasharray: 4 3; }
 
   /* zoom hint */
   .hint {
@@ -481,17 +498,23 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
         <button class="btn" id="btn-all">⊕ Show all</button>
         <button class="btn" id="btn-hide-unconnected">◑ Show unconnected</button>
         <button class="btn" id="btn-help">? Help</button>
+        <button class="btn" id="btn-export-svg">↓ SVG</button>
+        <button class="btn" id="btn-export-png">↓ PNG</button>
+        <button class="btn" id="btn-export-json">↓ JSON</button>
       </div>
       <div class="card charm-toggles" id="charm-toggles">
         <h2>Charms</h2>
+        <input class="charm-search" id="charm-search" type="search" placeholder="Filter charms…" autocomplete="off"/>
         <div id="charm-toggle-list"></div>
       </div>
       <div class="card legend">
         <h2>Legend</h2>
         <div class="row"><span class="sw" style="background:var(--accent)"></span> Charm</div>
+        <div class="row"><span class="sw" style="background:var(--accent); border: 1.5px dashed var(--accent); background: transparent;"></span> Subordinate charm</div>
         <div class="row"><span class="sw" style="background:var(--requires)"></span> requires (incoming)</div>
         <div class="row"><span class="sw" style="background:var(--provides)"></span> provides (outgoing)</div>
         <div class="row"><span class="sw" style="background:var(--peers)"></span> peers</div>
+        <div class="row"><span class="sw" style="background:transparent; border-bottom: 2px dashed #3a5a7a; width: 16px; height: 0;"></span> container-scope relation</div>
         <div class="row"><span class="sw" style="background:var(--integration)"></span> charm integration</div>
       </div>
     </div>
@@ -558,7 +581,7 @@ const sim = d3.forceSimulation(nodes)
 
 const link = g.append("g").attr("class","links").attr("stroke-opacity",0.5)
   .selectAll("path").data(links).join("path")
-  .attr("class", d => "link " + d.kind)
+  .attr("class", d => "link " + d.kind + (d.kind === "relation" && d.scope === "container" ? " container" : ""))
   .attr("marker-end", d => "url(#arrow-" + d.kind + ")");
 
 const node = g.append("g").attr("class","nodes").selectAll("g").data(nodes).join("g")
@@ -567,18 +590,22 @@ const node = g.append("g").attr("class","nodes").selectAll("g").data(nodes).join
     .on("drag",  (event, d) => { d.fx = event.x; d.fy = event.y; })
     .on("end",   (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
 
-// Subtle outer halo for charm
+// Subtle outer halo for charm (dashed for subordinate charms)
 node.filter(d => d.type === "charm").append("circle")
   .attr("r", d => radius(d) + 10).attr("fill","none")
-  .attr("stroke", CHARM_COLOR).attr("stroke-opacity",0.25).attr("stroke-width",2);
+  .attr("stroke", CHARM_COLOR).attr("stroke-opacity", d => d.subordinate ? 0.6 : 0.25)
+  .attr("stroke-width", 2)
+  .attr("stroke-dasharray", d => d.subordinate ? "4 3" : null)
+  .attr("class", d => d.subordinate ? "subordinate-ring" : null);
 
 // main circle: charms are hollow (dark fill, coloured ring); relations are solid
 node.append("circle")
   .attr("r", radius)
   .attr("fill", d => d.type === "charm" ? "#0d1b2a" : color(d))
   .attr("stroke", d => d.type === "charm" ? CHARM_COLOR : d3.color(color(d)).darker(0.6))
-  .attr("stroke-width", d => d.type === "charm" ? 2.5 : 1.5)
-  .attr("filter", d => d.type === "charm" ? "url(#glow)" : null);
+  .attr("stroke-width", d => d.type === "charm" ? (d.subordinate ? 1.5 : 2.5) : 1.5)
+  .attr("stroke-dasharray", d => d.type === "charm" && d.subordinate ? "4 3" : null)
+  .attr("filter", d => d.type === "charm" && !d.subordinate ? "url(#glow)" : null);
 
 // Labels: primary
 node.append("text")
@@ -595,7 +622,7 @@ node.filter(d => d.type === "relation").append("text")
 // sublabel for charm (node type)
 node.filter(d => d.type === "charm").append("text")
   .attr("class","node-sub").attr("dy", -2).attr("text-anchor","middle")
-  .text("charm");
+  .text(d => d.subordinate ? "subordinate" : "charm");
 
 sim.on("tick", () => {
   link.attr("d", d => {
@@ -669,10 +696,12 @@ function showCharmPanel(d) {
   let relsHtml = c.relations.map(r =>
     '<li><b>' + esc(r.endpoint) + '</b> <span style="color:'+ROLE_COLORS[r.role]+'">(' + r.role + ')</span> ' +
     '<span class="mono">' + esc(r.interface) + '</span>' +
+    (r.scope === "container" ? ' <span class="mono" style="color:#9bb0c7">[container]</span>' : '') +
     (r.limit? ' · limit '+r.limit : '') + '</li>').join("");
   openPanel(
     '<button class="close">✕</button>' +
     '<h2>'+esc(c.name)+'</h2>' +
+    (c.subordinate ? '<div class="badge" style="background:#3a2a4a; color:#b39ddb; border:1px dashed #b39ddb;">subordinate</div>' : '') +
     '<div class="stat"><b>'+c.stats.relations+'</b> relations</div>' +
     (c.summary? '<h3>Summary</h3><div class="desc">'+esc(c.summary)+'</div>':'') +
     (c.description? '<h3>Description</h3><div class="desc">'+esc(c.description)+'</div>':'') +
@@ -724,7 +753,9 @@ d3.select("#btn-help").on("click", () => {
     '<li><b>Show all</b>: re-enable every charm at once.</li>'+
     '<li><b>Hide unconnected</b>: hides requires/provides relations that aren&#39;t part of an integration with another visible charm. Click again to show them.</li>'+
     '<li><b>Colours</b>: charm nodes share a uniform blue ring; relation nodes are coloured by role — pink=requires, green=provides, gold=peers.</li>'+
+    '<li><b>Subordinate charms</b>: drawn with a dashed ring and a "subordinate" sub-label; their container-scope relations use a dashed edge.</li>'+
     '<li><b>Integrations</b>: gold links connect relations across charms that share a Juju interface (requires&lt;-&gt;provides).</li>'+
+    '<li><b>Export</b>: use the ↓ SVG / ↓ PNG / ↓ JSON buttons to download the current graph (respecting charm visibility and hide-unconnected) as a self-contained SVG, PNG, or JSON file.</li>'+
     '</ul>'
   );
 });
@@ -748,6 +779,17 @@ function toggleCharm(i, on) {
 function syncToggles() {
   toggleList.selectAll("input").property("checked", (d, i) => charmVisible.get(i));
 }
+
+// ---- Charm search/filter ----
+const charmSearch = d3.select("#charm-search");
+function filterCharms() {
+  const q = charmSearch.property("value").trim().toLowerCase();
+  toggleList.selectAll("label").style("display", function(c) {
+    if (!q) return null;
+    return c.name.toLowerCase().indexOf(q) !== -1 ? null : "none";
+  });
+}
+charmSearch.on("input", filterCharms);
 
 // ---- Title card ----
 const integrationCount = links.filter(l => l.kind === "integration").length;
@@ -778,6 +820,120 @@ window.addEventListener("resize", () => {
   sim.force("y", d3.forceY(H()/2).strength(0.06));
   sim.alpha(0.3).restart();
 });
+
+// ---- In-browser export (SVG / PNG / JSON) ----
+const EXPORT_BG = "#0d1b2a";
+
+function exportFilename(ext) {
+  let t = document.title || "charm-graph";
+  t = t.replace(/\\s*-\\s*charm visualizer\\s*$$/i, "").trim();
+  const base = (t || "charm-graph").replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$$/g, "").toLowerCase() || "charm-graph";
+  return base + "." + ext;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function inlineSvgStyles(srcRoot, dstRoot) {
+  // Copy computed presentation styles from the live SVG onto the exported
+  // clone as attributes, so the file is fully self-contained (no CSS
+  // stylesheet / variables required when rendered standalone or via <img>).
+  const props = ["fill","fill-opacity","stroke","stroke-width","stroke-opacity",
+                 "font-size","font-weight","font-family","text-anchor"];
+  const src = srcRoot.querySelectorAll("*");
+  const dst = dstRoot.querySelectorAll("*");
+  for (let i = 0; i < src.length && i < dst.length; i++) {
+    const cs = window.getComputedStyle(src[i]);
+    for (const p of props) {
+      const v = cs.getPropertyValue(p);
+      if (v) dst[i].setAttribute(p, v);
+    }
+  }
+}
+
+function buildExportSVG() {
+  const svgEl = svg.node();
+  const clone = svgEl.cloneNode(true);
+  // Drop hidden nodes/links so the export matches what's on screen.
+  clone.querySelectorAll('[display="none"]').forEach(el => el.remove());
+  // Strip the zoom/pan transform so we export raw node coordinates.
+  const zl = clone.querySelector(".zoom-layer");
+  if (zl) zl.removeAttribute("transform");
+  // Bounds of the actual content (ignoring pan/zoom).
+  let bbox;
+  try { bbox = g.node().getBBox(); } catch(e) { bbox = {x:0,y:0,width:W(),height:H()}; }
+  if (!isFinite(bbox.width) || bbox.width <= 0) { bbox = {x:0,y:0,width:W(),height:H()}; }
+  const pad = 60;
+  const vbX = bbox.x - pad, vbY = bbox.y - pad;
+  const vbW = bbox.width + pad*2, vbH = bbox.height + pad*2;
+  clone.setAttribute("viewBox", vbX + " " + vbY + " " + vbW + " " + vbH);
+  clone.setAttribute("width", vbW);
+  clone.setAttribute("height", vbH);
+  clone.removeAttribute("style");
+  // Background rect so SVG/PNG have the same dark canvas as the app.
+  const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  bg.setAttribute("x", vbX); bg.setAttribute("y", vbY);
+  bg.setAttribute("width", vbW); bg.setAttribute("height", vbH);
+  bg.setAttribute("fill", EXPORT_BG);
+  clone.insertBefore(bg, clone.firstChild);
+  // Inline computed styles onto the clone.
+  inlineSvgStyles(svgEl, clone);
+  return clone;
+}
+
+function exportSVG() {
+  const clone = buildExportSVG();
+  const xml = '<?xml version="1.0" encoding="UTF-8"?>\\n' + new XMLSerializer().serializeToString(clone);
+  downloadBlob(new Blob([xml], {type: "image/svg+xml;charset=utf-8"}), exportFilename("svg"));
+}
+
+function exportPNG() {
+  const clone = buildExportSVG();
+  const xml = new XMLSerializer().serializeToString(clone);
+  const svgUrl = URL.createObjectURL(new Blob([xml], {type: "image/svg+xml;charset=utf-8"}));
+  const vb = clone.getAttribute("viewBox").split(/\\s+/).map(Number);
+  const scale = 2; // retina-quality
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(vb[2] * scale);
+    canvas.height = Math.round(vb[3] * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = EXPORT_BG;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(svgUrl);
+    canvas.toBlob(blob => {
+      if (blob) downloadBlob(blob, exportFilename("png"));
+      else alert("PNG export failed: canvas could not be encoded.");
+    }, "image/png");
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(svgUrl);
+    alert("PNG export failed: the SVG could not be rasterised in this browser.");
+  };
+  img.src = svgUrl;
+}
+
+function exportJSON() {
+  // GRAPH_DATA.links have source/target resolved to node objects; convert
+  // back to id strings for a clean, portable JSON file.
+  const data = JSON.parse(JSON.stringify(GRAPH_DATA, (key, val) => {
+    if ((key === "source" || key === "target") && val && typeof val === "object" && val.id) return val.id;
+    return val;
+  }));
+  downloadBlob(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}), exportFilename("json"));
+}
+
+d3.select("#btn-export-svg").on("click", exportSVG);
+d3.select("#btn-export-png").on("click", exportPNG);
+d3.select("#btn-export-json").on("click", exportJSON);
 </script>
 </body>
 </html>
@@ -842,10 +998,15 @@ def _dot_escape(s: str) -> str:
 
 def _dot_node_attrs(node: dict) -> str:
     if node["type"] == "charm":
+        style = "filled,bold"
+        penwidth = 2
+        if node.get("subordinate"):
+            style = "filled,dashed"
+            penwidth = 1.5
         return (
             f'label="{_dot_escape(node["name"])}", '
-            f'fillcolor="{CHARM_COLOR}", style="filled,bold", '
-            f'fontcolor="{BG_COLOR}", penwidth=2'
+            f'fillcolor="{CHARM_COLOR}", style="{style}", '
+            f'fontcolor="{BG_COLOR}", penwidth={penwidth}'
         )
     role = node.get("role", "")
     color = ROLE_COLORS.get(role, "#888888")
@@ -882,10 +1043,12 @@ def _render_dot(graph: dict, title: str) -> str:
                 f'label="{_dot_escape(l.get("interface", ""))}"];'
             )
         else:
-            role = l.get("role") or ""
+            scope = l.get("scope")
+            style = "dashed" if scope == "container" else "solid"
             lines.append(
                 f'  "{_dot_escape(src)}" -> "{_dot_escape(tgt)}" '
-                f'[color="{RELATION_LINK_COLOR}", penwidth=1.5, arrowhead=none];'
+                f'[color="{RELATION_LINK_COLOR}", penwidth=1.5, arrowhead=none, '
+                f'style="{style}"];'
             )
     lines.append("}")
     return "\n".join(lines) + "\n"
@@ -914,14 +1077,19 @@ def _render_mermaid(graph: dict, title: str) -> str:
         mid = _mermaid_id(n["id"])
         if n["type"] == "charm":
             label = n["name"].replace('"', "'")
-            lines.append(f'  {mid}(("{label}")):::charm')
+            if n.get("subordinate"):
+                # Dashed border via Mermaid "subroutine" shape + subordinate class
+                lines.append(f'  {mid}[/"{label}"/]:::subordinate')
+            else:
+                lines.append(f'  {mid}(("{label}")):::charm')
         else:
             label = _node_label(n).replace("\\n", "<br/>").replace('"', "'")
             role = n.get("role", "")
             lines.append(f'  {mid}(["{label}"]):::rel-{role}')
 
     lines.append("")
-    for l in graph["links"]:
+    container_link_indices = []
+    for li, l in enumerate(graph["links"]):
         src = l["source"] if isinstance(l["source"], str) else l["source"]["id"]
         tgt = l["target"] if isinstance(l["target"], str) else l["target"]["id"]
         src_m = _mermaid_id(src)
@@ -930,15 +1098,22 @@ def _render_mermaid(graph: dict, title: str) -> str:
             iface = l.get("interface") or ""
             lines.append(f'  {src_m} ---|{iface}| {tgt_m}')
         else:
-            role = l.get("role") or ""
-            lines.append(f'  {src_m} --- {tgt_m}')
+            scope = l.get("scope")
+            if scope == "container":
+                lines.append(f'  {src_m} -.->|container| {tgt_m}')
+                container_link_indices.append(li)
+            else:
+                lines.append(f'  {src_m} --- {tgt_m}')
 
     lines.append("")
     lines.append(f'  classDef charm fill:{CHARM_COLOR},stroke:{CHARM_COLOR},color:{BG_COLOR},stroke-width:2px;')
+    lines.append(f'  classDef subordinate fill:{CHARM_COLOR},stroke:{CHARM_COLOR},color:{BG_COLOR},stroke-dasharray: 4 3,stroke-width:1.5px;')
     lines.append(f'  classDef rel-requires fill:{ROLE_COLORS["requires"]},stroke:{ROLE_COLORS["requires"]},color:{BG_COLOR};')
     lines.append(f'  classDef rel-provides fill:{ROLE_COLORS["provides"]},stroke:{ROLE_COLORS["provides"]},color:{BG_COLOR};')
     lines.append(f'  classDef rel-peers fill:{ROLE_COLORS["peers"]},stroke:{ROLE_COLORS["peers"]},color:{BG_COLOR};')
     lines.append(f'  linkStyle default stroke:{RELATION_LINK_COLOR},stroke-width:1.5px;')
+    for li in container_link_indices:
+        lines.append(f'  linkStyle {li} stroke:{RELATION_LINK_COLOR},stroke-width:1.5px,stroke-dasharray: 5 4;')
     return "\n".join(lines) + "\n"
 
 
@@ -1043,9 +1218,11 @@ def _render_svg(graph: dict, title: str) -> str:
                     f'font-size="10">{_svg_escape(iface)}</text>'
                 )
         else:
+            scope = l.get("scope")
+            dash = ' stroke-dasharray="5 4"' if scope == "container" else ""
             out.append(
                 f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" '
-                f'stroke="{RELATION_LINK_COLOR}" stroke-width="1.5" stroke-opacity="0.6"/>'
+                f'stroke="{RELATION_LINK_COLOR}" stroke-width="1.5" stroke-opacity="0.6"{dash}/>'
             )
 
     # Nodes.
@@ -1053,22 +1230,31 @@ def _render_svg(graph: dict, title: str) -> str:
         x, y = pos[n["id"]]
         if n["type"] == "charm":
             r = 34
+            sub = n.get("subordinate", False)
+            halo_dash = ' stroke-dasharray="4 3"' if sub else ""
+            halo_opacity = "0.6" if sub else "0.25"
+            halo_width = "1.5" if sub else "2"
             out.append(
                 f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{r + 8}" '
-                f'fill="none" stroke="{CHARM_COLOR}" stroke-opacity="0.25" stroke-width="2"/>'
+                f'fill="none" stroke="{CHARM_COLOR}" stroke-opacity="{halo_opacity}" '
+                f'stroke-width="{halo_width}"{halo_dash}/>'
             )
+            ring_dash = ' stroke-dasharray="4 3"' if sub else ""
+            ring_width = "1.5" if sub else "2.5"
             out.append(
                 f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{r}" fill="{BG_COLOR}" '
-                f'stroke="{CHARM_COLOR}" stroke-width="2.5"/>'
+                f'stroke="{CHARM_COLOR}" stroke-width="{ring_width}"{ring_dash}/>'
             )
             out.append(
                 f'<text x="{x:.0f}" y="{y - r - 14:.0f}" text-anchor="middle" '
                 f'fill="{TEXT_COLOR}" font-size="13" font-weight="600">'
                 f'{_svg_escape(n["name"])}</text>'
             )
+            sub_label = "subordinate" if sub else "charm"
+            sub_fill = "#b39ddb" if sub else "#9bb0c7"
             out.append(
                 f'<text x="{x:.0f}" y="{y + 4:.0f}" text-anchor="middle" '
-                f'fill="#9bb0c7" font-size="10">charm</text>'
+                f'fill="{sub_fill}" font-size="10">{sub_label}</text>'
             )
         else:
             r = 18

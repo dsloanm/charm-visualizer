@@ -10,6 +10,7 @@ Given the path to a charm directory (one containing a `metadata.yaml` or `charmc
 
 - **Interactive force-directed graph** — drag nodes, pan, and zoom with the scroll wheel (or the +/- buttons).
 - **Charms and interfaces** — each charm is a central node with its relations around it, color-coded by role: `requires` = pink, `provides` = green, `peers` = gold. Charm nodes share a uniform blue ring (with a "charm" label) so the graph stays calm and readable; the Charms list is a simple checkbox + name per charm.
+- **Subordinate charms** — charms with `subordinate: true` in their metadata are drawn with a dashed ring and a "subordinate" sub-label, and their `scope: container` relations use a dashed edge style so they're visually distinct from principal charms.
 - **Integrations** — gold links connect relations across charms that share a Juju interface (`requires` <-> `provides`), mirroring how Juju connects charms over a shared interface.
 - **Per-charm visibility toggle** — the "Charms" list (top-left) has a checkbox per charm to toggle its visibility on or off one at a time. Hidden charms and their relations/integrations disappear from the graph. "Show all" re-enables every charm.
 - **Hide unconnected** — by default, `requires`/`provides` relations that aren't part of an integration with another visible charm (i.e. no other charm shares the interface) are hidden. The "Show unconnected" button reveals them; click again to hide.
@@ -51,7 +52,7 @@ Run `python3 visualize_charm.py --help` for all options.
 
 ### What gets parsed
 
-For each charm, `charmcraft.yaml`'s or `metadata.yaml`'s `requires` / `provides` / `peers` sections define the relations (endpoint, role, interface, limit, scope, optional). Charm integrations are determined by matching interfaces with complementary roles.
+For each charm, `charmcraft.yaml`'s or `metadata.yaml`'s `requires` / `provides` / `peers` sections define the relations (endpoint, role, interface, limit, scope, optional). The `subordinate` flag is also read and used to visually distinguish subordinate charms. Charm integrations are determined by matching interfaces with complementary roles.
 
 ## Sample charms
 
