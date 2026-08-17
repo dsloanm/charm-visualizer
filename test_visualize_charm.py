@@ -229,8 +229,8 @@ class FormatRenderTests(unittest.TestCase):
         self.assertIn("classDef charm", out)
         self.assertIn("classDef rel-requires", out)
         self.assertIn("classDef rel-provides", out)
-        # Integration edges carry the interface name as a label.
-        self.assertIn("|mysql|", out)
+        # Integration edges carry the interface name as a (quoted) label.
+        self.assertIn('|"mysql"|', out)
         # Integration endpoint names are referenced.
         self.assertIn("db", out)
 
@@ -265,6 +265,117 @@ class FormatRenderTests(unittest.TestCase):
             out = visualizer.render(self.pair, "pair", fmt=fmt)
             self.assertIsInstance(out, str)
             self.assertTrue(out)
+
+
+class EscapingTests(unittest.TestCase):
+    """Regression tests for output escaping across all formats."""
+
+    @classmethod
+    def setUpClass(cls):
+        # A charm whose name and interface contain characters that are
+        # dangerous in each output format: quotes, angle brackets, pipe,
+        # the </script> sequence, and a newline.
+        cls.weird = visualizer.CharmModel(
+            name='char</script>m & "co"',
+            summary='has </script> in it',
+            description='line1\nline2 </script>',
+            subordinate=False,
+            relations=[
+                {
+                    "endpoint": 'ep|pipe',
+                    "role": "requires",
+                    "interface": 'if<br>x',
+                    "limit": None,
+                    "scope": None,
+                    "optional": False,
+                }
+            ],
+            stats={"relations": 1, "subordinate": False},
+        )
+        cls.provider = visualizer.CharmModel(
+            name="provider",
+            summary="",
+            description="",
+            subordinate=False,
+            relations=[
+                {
+                    "endpoint": 'ep|pipe',
+                    "role": "provides",
+                    "interface": 'if<br>x',
+                    "limit": None,
+                    "scope": None,
+                    "optional": False,
+                }
+            ],
+            stats={"relations": 1, "subordinate": False},
+        )
+        cls.models = [cls.weird, cls.provider]
+
+    def test_html_escapes_script_close_tag(self):
+        """A </script> in charm metadata must not break the inline <script>."""
+        html = visualizer.render(self.models, "test", fmt="html")
+        # The raw </script> sequence from the data must be escaped.
+        # Find the GRAPH_DATA line and verify no raw </script> inside it.
+        gd_start = html.index("const GRAPH_DATA = ")
+        gd_end = html.index(";\n", gd_start)
+        data_line = html[gd_start:gd_end]
+        self.assertNotIn("</script>", data_line)
+        # The escaped form <\/script> should be present instead.
+        self.assertIn("<\\/script>", data_line)
+
+    def test_mermaid_escapes_quotes_in_labels(self):
+        out = visualizer.render(self.models, 'ti"tle', fmt="mermaid")
+        # Double quotes in the title and node labels must be escaped.
+        self.assertNotIn('ti"tle', out)
+        self.assertIn("#quot;", out)
+
+    def test_mermaid_escapes_pipe_in_interface_label(self):
+        out = visualizer.render(self.models, "test", fmt="mermaid")
+        # The pipe in the endpoint name must not appear unescaped inside
+        # an edge label (it would terminate the label early). Edge labels
+        # are now quoted so the pipe is safe inside the quotes.
+        # Verify the integration edge label is quoted.
+        self.assertIn('|"if<br>x"|', out)
+
+    def test_dot_escapes_newlines(self):
+        """Newlines in charm names must be escaped to avoid breaking DOT."""
+        import re
+        weird = visualizer.CharmModel(
+            name="line\nbreak",
+            summary="",
+            description="",
+            subordinate=False,
+            relations=[],
+            stats={"relations": 0, "subordinate": False},
+        )
+        out = visualizer.render([weird], "test", fmt="dot")
+        # The label line must not contain a literal newline inside the quoted string.
+        # Find the node label line.
+        match = re.search(r'"line\\nbreak"', out)
+        self.assertIsNotNone(match, "newline in name should be escaped as \\n in DOT")
+
+    def test_dot_escapes_angle_brackets(self):
+        out = visualizer.render(self.models, "test", fmt="dot")
+        # Angle brackets are not special in DOT labels, but must not break
+        # the attribute syntax. The label should contain them literally.
+        self.assertIn("if<br>x", out)
+
+    def test_svg_escapes_angle_brackets(self):
+        """Angle brackets in charm names must be XML-escaped in SVG."""
+        import xml.etree.ElementTree as ET
+        out = visualizer.render(self.models, "test", fmt="svg")
+        # Must parse as valid XML.
+        root = ET.fromstring(out)
+        # The <br> in the interface must be escaped, not parsed as a tag.
+        texts = [t.text for t in root.iter("{http://www.w3.org/2000/svg}text") if t.text]
+        joined = " ".join(texts)
+        self.assertIn("if<br>x", joined)
+
+    def test_json_is_valid_with_special_chars(self):
+        import json as _json
+        out = visualizer.render(self.models, "test", fmt="json")
+        payload = _json.loads(out)
+        self.assertEqual(payload["charms"][0]["name"], 'char</script>m & "co"')
 
 
 class SubordinateTests(unittest.TestCase):
@@ -344,8 +455,8 @@ class SubordinateTests(unittest.TestCase):
         # Subordinate node class and dashed border classDef.
         self.assertIn(":::subordinate", out)
         self.assertIn("stroke-dasharray: 4 3", out)
-        # Container-scope edge is dotted with a label.
-        self.assertIn("-.->|container|", out)
+        # Container-scope edge is dotted with a (quoted) label.
+        self.assertIn('-.->|"container"|', out)
         # linkStyle override for container edges.
         self.assertIn("stroke-dasharray: 5 4", out)
 

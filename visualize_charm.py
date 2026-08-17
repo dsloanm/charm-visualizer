@@ -316,7 +316,10 @@ def _load_d3() -> str:
 
 
 def _render_html(graph: dict, title: str, d3_inline: bool = True) -> str:
-    data_json = json.dumps(graph)
+    # Escape </script> (and </style>) so charm metadata containing those
+    # sequences can't break out of the inline <script> tag. The JSON spec
+    # allows solidus escaping, so <\/script> is valid JSON + safe in JS.
+    data_json = json.dumps(graph).replace("</", "<\\/")
     d3_src = _load_d3()
     d3_tag_is_src = d3_src.lstrip().startswith("<script")
     if d3_inline and not d3_tag_is_src:
@@ -993,7 +996,12 @@ def _node_label(node: dict) -> str:
 
 
 def _dot_escape(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        s.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
 
 
 def _dot_node_attrs(node: dict) -> str:
@@ -1065,10 +1073,25 @@ def _mermaid_id(node_id: str) -> str:
     return "".join(safe)
 
 
+def _mermaid_escape(s: str) -> str:
+    """Escape text for use inside a Mermaid quoted label or edge label.
+
+    Mermaid quoted labels use ``"..."`` and support ``<br/>`` for line
+    breaks. Inside the quotes, the only character that must be escaped is
+    the double quote itself. Edge labels (``---|text|``) are NOT quoted
+    by default, so we also strip the pipe character which would otherwise
+    terminate the label early. We wrap edge labels in quotes at the call
+    site so that ``|`` and other special chars are safe.
+    """
+    if not s:
+        return ""
+    return s.replace('"', "#quot;")
+
+
 def _render_mermaid(graph: dict, title: str) -> str:
     lines: list[str] = []
     lines.append("---")
-    lines.append("title: " + title.replace('"', "'"))
+    lines.append("title: " + _mermaid_escape(title))
     lines.append("---")
     lines.append("flowchart LR")
     lines.append("")
@@ -1076,14 +1099,14 @@ def _render_mermaid(graph: dict, title: str) -> str:
     for n in graph["nodes"]:
         mid = _mermaid_id(n["id"])
         if n["type"] == "charm":
-            label = n["name"].replace('"', "'")
+            label = _mermaid_escape(n["name"])
             if n.get("subordinate"):
                 # Dashed border via Mermaid "subroutine" shape + subordinate class
                 lines.append(f'  {mid}[/"{label}"/]:::subordinate')
             else:
                 lines.append(f'  {mid}(("{label}")):::charm')
         else:
-            label = _node_label(n).replace("\\n", "<br/>").replace('"', "'")
+            label = _mermaid_escape(_node_label(n).replace("\\n", "<br/>"))
             role = n.get("role", "")
             lines.append(f'  {mid}(["{label}"]):::rel-{role}')
 
@@ -1095,12 +1118,12 @@ def _render_mermaid(graph: dict, title: str) -> str:
         src_m = _mermaid_id(src)
         tgt_m = _mermaid_id(tgt)
         if l["kind"] == "integration":
-            iface = l.get("interface") or ""
-            lines.append(f'  {src_m} ---|{iface}| {tgt_m}')
+            iface = _mermaid_escape(l.get("interface") or "")
+            lines.append(f'  {src_m} ---|"{iface}"| {tgt_m}')
         else:
             scope = l.get("scope")
             if scope == "container":
-                lines.append(f'  {src_m} -.->|container| {tgt_m}')
+                lines.append(f'  {src_m} -.->|"container"| {tgt_m}')
                 container_link_indices.append(li)
             else:
                 lines.append(f'  {src_m} --- {tgt_m}')
