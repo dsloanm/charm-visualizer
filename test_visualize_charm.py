@@ -126,5 +126,102 @@ class CombinedGraphTests(unittest.TestCase):
         self.assertEqual(relation_node["role"], "requires")
 
 
+class FormatRenderTests(unittest.TestCase):
+    """Smoke tests for the non-HTML output formats."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.models = [
+            visualizer.inspect_charm(path)
+            for path in visualizer._find_charm_dirs(SAMPLE_CHARMS)
+        ]
+        # Two charms that integrate, so integrations appear in output.
+        cls.pair = [
+            _charm("app", requires={"db": "mysql"}),
+            _charm("database", provides={"db": "mysql"}),
+        ]
+
+    def test_render_invalid_format_raises(self):
+        with self.assertRaises(ValueError):
+            visualizer.render(self.pair, "pair", fmt="bogus")
+
+    def test_json_output_includes_nodes_and_links(self):
+        out = visualizer.render(self.pair, "pair", fmt="json")
+        import json as _json
+        payload = _json.loads(out)
+        self.assertIn("nodes", payload)
+        self.assertIn("links", payload)
+        self.assertEqual(payload["title"], "pair")
+        self.assertTrue(any(n["type"] == "charm" for n in payload["nodes"]))
+        self.assertTrue(
+            any(l["kind"] == "integration" for l in payload["links"])
+        )
+
+    def test_json_output_is_valid_json_for_sample_charms(self):
+        import json as _json
+        out = visualizer.render(self.models, "all", fmt="json")
+        payload = _json.loads(out)
+        self.assertEqual(len(payload["charms"]), len(self.models))
+
+    def test_dot_output_is_well_formed(self):
+        out = visualizer.render(self.pair, "pair", fmt="dot")
+        self.assertTrue(out.lstrip().startswith("digraph"))
+        self.assertIn("}", out)
+        # Both charms and at least one integration link present.
+        self.assertIn("app", out)
+        self.assertIn("database", out)
+        self.assertIn("mysql", out)
+        self.assertIn(visualizer.INTEGRATION_COLOR, out)
+
+    def test_dot_escapes_quotes(self):
+        weird = _charm('na"me', requires={"db": "mysql"})
+        out = visualizer.render([weird], "weird", fmt="dot")
+        # The embedded quote must be escaped, not break the graph string.
+        self.assertIn('\\"', out)
+
+    def test_mermaid_output_uses_flowchart(self):
+        out = visualizer.render(self.pair, "pair", fmt="mermaid")
+        self.assertIn("flowchart LR", out)
+        self.assertIn("classDef charm", out)
+        self.assertIn("classDef rel-requires", out)
+        self.assertIn("classDef rel-provides", out)
+        # Integration edges carry the interface name as a label.
+        self.assertIn("|mysql|", out)
+        # Integration endpoint names are referenced.
+        self.assertIn("db", out)
+
+    def test_mermaid_title_block(self):
+        out = visualizer.render(self.pair, "My Pair", fmt="mermaid")
+        self.assertIn("title: My Pair", out)
+
+    def test_svg_output_is_valid_xml(self):
+        import xml.etree.ElementTree as ET
+        out = visualizer.render(self.pair, "pair", fmt="svg")
+        self.assertTrue(out.lstrip().startswith("<?xml"))
+        # Should parse without raising.
+        root = ET.fromstring(out)
+        self.assertEqual(root.tag, "{http://www.w3.org/2000/svg}svg")
+        # Background rect + at least one circle (node) and one line (link).
+        circles = root.findall(
+            ".//{http://www.w3.org/2000/svg}circle"
+        )
+        lines = root.findall(
+            ".//{http://www.w3.org/2000/svg}line"
+        )
+        self.assertGreater(len(circles), 0)
+        self.assertGreater(len(lines), 0)
+
+    def test_svg_output_for_sample_charms_parses(self):
+        import xml.etree.ElementTree as ET
+        out = visualizer.render(self.models, "all", fmt="svg")
+        ET.fromstring(out)  # must not raise
+
+    def test_render_format_dispatch_matches_each_format(self):
+        for fmt in visualizer.SUPPORTED_FORMATS:
+            out = visualizer.render(self.pair, "pair", fmt=fmt)
+            self.assertIsInstance(out, str)
+            self.assertTrue(out)
+
+
 if __name__ == "__main__":
     unittest.main()

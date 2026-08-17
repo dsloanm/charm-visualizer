@@ -31,6 +31,10 @@ Usage::
 
     python3 visualize_charm.py <charm_dir> [-o output.html]
     python3 visualize_charm.py --all <dir_with_charms> [-o output.html]
+    python3 visualize_charm.py <charm_dir> --format dot -o graph.dot
+    python3 visualize_charm.py <charm_dir> --format mermaid -o graph.mmd
+    python3 visualize_charm.py <charm_dir> --format svg -o graph.svg
+    python3 visualize_charm.py <charm_dir> --format json -o graph.json
 
 Run ``python3 visualize_charm.py --help`` for full options.
 """
@@ -795,12 +799,313 @@ def _find_charm_dirs(root: Path) -> list[Path]:
     return sorted(found)
 
 
-def render(models: list[CharmModel], title: str) -> str:
+# ---------------------------------------------------------------------------
+# Other output formats
+# ---------------------------------------------------------------------------
+
+# Colour palette shared with the HTML view, reused by the non-HTML formats.
+CHARM_COLOR = "#4cc9f0"
+ROLE_COLORS = {"requires": "#f72585", "provides": "#06d6a0", "peers": "#ffd166"}
+INTEGRATION_COLOR = "#ffd166"
+RELATION_LINK_COLOR = "#3a5a7a"
+BG_COLOR = "#0d1b2a"
+TEXT_COLOR = "#e7eef7"
+
+SUPPORTED_FORMATS = ("html", "json", "dot", "mermaid", "svg")
+DEFAULT_OUTPUT_EXT = {
+    "html": ".html",
+    "json": ".json",
+    "dot": ".dot",
+    "mermaid": ".mmd",
+    "svg": ".svg",
+}
+
+
+def _graph_for_render(models: list[CharmModel]) -> dict:
+    """Pick single-charm vs combined graph builder."""
     if len(models) == 1:
-        graph = build_graph(models[0])
-    else:
-        graph = build_combined_graph(models)
-    return _render_html(graph, title)
+        return build_graph(models[0])
+    return build_combined_graph(models)
+
+
+def _node_label(node: dict) -> str:
+    """Human-readable label for a graph node."""
+    if node["type"] == "charm":
+        return node["name"]
+    iface = node.get("interface") or ""
+    return f"{node['name']}\\n{iface}" if iface else node["name"]
+
+
+def _dot_escape(s: str) -> str:
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _dot_node_attrs(node: dict) -> str:
+    if node["type"] == "charm":
+        return (
+            f'label="{_dot_escape(node["name"])}", '
+            f'fillcolor="{CHARM_COLOR}", style="filled,bold", '
+            f'fontcolor="{BG_COLOR}", penwidth=2'
+        )
+    role = node.get("role", "")
+    color = ROLE_COLORS.get(role, "#888888")
+    name = _dot_escape(node["name"])
+    iface = node.get("interface") or ""
+    label = f"{name}\\n{_dot_escape(iface)}" if iface else name
+    return (
+        f'label="{label}", '
+        f'fillcolor="{color}", style="filled", '
+        f'fontcolor="{BG_COLOR}", penwidth=1.5'
+    )
+
+
+def _render_dot(graph: dict, title: str) -> str:
+    lines: list[str] = []
+    lines.append(f'digraph "{_dot_escape(title)}" {{')
+    lines.append(f'  graph [bgcolor="{BG_COLOR}", label="{_dot_escape(title)}", labelloc=t, fontcolor="{TEXT_COLOR}", fontname="Helvetica"];')
+    lines.append(f'  node [shape=ellipse, fontname="Helvetica", fontsize=10];')
+    lines.append(f'  edge [fontname="Helvetica", fontsize=9];')
+    lines.append("")
+
+    for n in graph["nodes"]:
+        lines.append(f'  "{_dot_escape(n["id"])}" [{_dot_node_attrs(n)}];')
+
+    lines.append("")
+    for l in graph["links"]:
+        src = l["source"] if isinstance(l["source"], str) else l["source"]["id"]
+        tgt = l["target"] if isinstance(l["target"], str) else l["target"]["id"]
+        if l["kind"] == "integration":
+            lines.append(
+                f'  "{_dot_escape(src)}" -> "{_dot_escape(tgt)}" '
+                f'[color="{INTEGRATION_COLOR}", penwidth=2.5, '
+                f'arrowhead=open, fontcolor="{INTEGRATION_COLOR}", '
+                f'label="{_dot_escape(l.get("interface", ""))}"];'
+            )
+        else:
+            role = l.get("role") or ""
+            lines.append(
+                f'  "{_dot_escape(src)}" -> "{_dot_escape(tgt)}" '
+                f'[color="{RELATION_LINK_COLOR}", penwidth=1.5, arrowhead=none];'
+            )
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def _mermaid_id(node_id: str) -> str:
+    # Mermaid node IDs must be alphanumeric (with a few extras). Sanitise.
+    safe = []
+    for ch in node_id:
+        if ch.isalnum() or ch in ("_",):
+            safe.append(ch)
+        else:
+            safe.append("_")
+    return "".join(safe)
+
+
+def _render_mermaid(graph: dict, title: str) -> str:
+    lines: list[str] = []
+    lines.append("---")
+    lines.append("title: " + title.replace('"', "'"))
+    lines.append("---")
+    lines.append("flowchart LR")
+    lines.append("")
+
+    for n in graph["nodes"]:
+        mid = _mermaid_id(n["id"])
+        if n["type"] == "charm":
+            label = n["name"].replace('"', "'")
+            lines.append(f'  {mid}(("{label}")):::charm')
+        else:
+            label = _node_label(n).replace("\\n", "<br/>").replace('"', "'")
+            role = n.get("role", "")
+            lines.append(f'  {mid}(["{label}"]):::rel-{role}')
+
+    lines.append("")
+    for l in graph["links"]:
+        src = l["source"] if isinstance(l["source"], str) else l["source"]["id"]
+        tgt = l["target"] if isinstance(l["target"], str) else l["target"]["id"]
+        src_m = _mermaid_id(src)
+        tgt_m = _mermaid_id(tgt)
+        if l["kind"] == "integration":
+            iface = l.get("interface") or ""
+            lines.append(f'  {src_m} ---|{iface}| {tgt_m}')
+        else:
+            role = l.get("role") or ""
+            lines.append(f'  {src_m} --- {tgt_m}')
+
+    lines.append("")
+    lines.append(f'  classDef charm fill:{CHARM_COLOR},stroke:{CHARM_COLOR},color:{BG_COLOR},stroke-width:2px;')
+    lines.append(f'  classDef rel-requires fill:{ROLE_COLORS["requires"]},stroke:{ROLE_COLORS["requires"]},color:{BG_COLOR};')
+    lines.append(f'  classDef rel-provides fill:{ROLE_COLORS["provides"]},stroke:{ROLE_COLORS["provides"]},color:{BG_COLOR};')
+    lines.append(f'  classDef rel-peers fill:{ROLE_COLORS["peers"]},stroke:{ROLE_COLORS["peers"]},color:{BG_COLOR};')
+    lines.append(f'  linkStyle default stroke:{RELATION_LINK_COLOR},stroke-width:1.5px;')
+    return "\n".join(lines) + "\n"
+
+
+def _render_json(graph: dict, title: str) -> str:
+    payload = {"title": title, **graph}
+    return json.dumps(payload, indent=2, default=str) + "\n"
+
+
+def _compute_static_positions(graph: dict) -> dict[str, tuple[float, float]]:
+    """Assign deterministic (x, y) coordinates to every node for SVG output.
+
+    For combined graphs, ``build_combined_graph`` already seeds an x-offset per
+    cluster; we keep that and spread the relation nodes evenly around the charm
+    node in a circle so nothing overlaps.
+    """
+    pos: dict[str, tuple[float, float]] = {}
+    nodes_by_charm: dict[int, list[dict]] = {}
+    for n in graph["nodes"]:
+        nodes_by_charm.setdefault(n.get("charm_index", 0), []).append(n)
+
+    import math
+
+    canvas_w = 0.0
+    for idx, group in nodes_by_charm.items():
+        charm_node = next((n for n in group if n["type"] == "charm"), None)
+        if charm_node is None:
+            continue
+        cx = float(charm_node.get("x") or 400)
+        cy = float(charm_node.get("y") or 300)
+        pos[charm_node["id"]] = (cx, cy)
+        rels = [n for n in group if n["type"] != "charm"]
+        count = len(rels)
+        # radius grows with the number of relations so labels don't collide
+        radius = 90.0 + 18.0 * count
+        for i, n in enumerate(rels):
+            angle = 2 * math.pi * i / count - math.pi / 2
+            pos[n["id"]] = (cx + radius * math.cos(angle), cy + radius * math.sin(angle))
+        canvas_w = max(canvas_w, cx + radius + 200)
+
+    # Fallback for any node without a position (defensive).
+    for n in graph["nodes"]:
+        if n["id"] not in pos:
+            pos[n["id"]] = (400.0, 300.0)
+    return pos
+
+
+def _svg_escape(s: str) -> str:
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _render_svg(graph: dict, title: str) -> str:
+    pos = _compute_static_positions(graph)
+    xs = [x for x, _ in pos.values()]
+    ys = [y for _, y in pos.values()]
+    pad = 80
+    min_x = min(xs) - pad
+    min_y = min(ys) - pad
+    width = max(xs) + pad - min_x
+    height = max(ys) + pad - min_y
+
+    out: list[str] = []
+    out.append('<?xml version="1.0" encoding="UTF-8"?>')
+    out.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="{min_x:.0f} {min_y:.0f} {width:.0f} {height:.0f}" '
+        f'font-family="Helvetica, Arial, sans-serif">'
+    )
+    out.append(f'<rect x="{min_x:.0f}" y="{min_y:.0f}" width="{width:.0f}" height="{height:.0f}" fill="{BG_COLOR}"/>')
+    out.append(f'<text x="{min_x + 10:.0f}" y="{min_y + 24:.0f}" fill="{CHARM_COLOR}" font-size="16" font-weight="bold">{_svg_escape(title)}</text>')
+
+    # Arrowhead marker
+    out.append(
+        '<defs><marker id="arrow" viewBox="0 -5 10 10" refX="8" refY="0" '
+        'markerWidth="6" markerHeight="6" orient="auto">'
+        '<path d="M0,-5L10,0L0,5" fill="#9bb0c7"/></marker></defs>'
+    )
+
+    # Links first so nodes overlay them.
+    for l in graph["links"]:
+        src = l["source"] if isinstance(l["source"], str) else l["source"]["id"]
+        tgt = l["target"] if isinstance(l["target"], str) else l["target"]["id"]
+        x1, y1 = pos[src]
+        x2, y2 = pos[tgt]
+        if l["kind"] == "integration":
+            stroke = INTEGRATION_COLOR
+            width_attr = "3"
+            mid = f'{(x1 + x2) / 2:.0f},{(y1 + y2) / 2:.0f}'
+            out.append(
+                f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" '
+                f'stroke="{stroke}" stroke-width="{width_attr}" stroke-opacity="0.8" '
+                f'marker-end="url(#arrow)"/>'
+            )
+            iface = l.get("interface") or ""
+            if iface:
+                out.append(
+                    f'<text x="{(x1 + x2) / 2:.0f}" y="{(y1 + y2) / 2 - 6:.0f}" '
+                    f'text-anchor="middle" fill="{INTEGRATION_COLOR}" '
+                    f'font-size="10">{_svg_escape(iface)}</text>'
+                )
+        else:
+            out.append(
+                f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" '
+                f'stroke="{RELATION_LINK_COLOR}" stroke-width="1.5" stroke-opacity="0.6"/>'
+            )
+
+    # Nodes.
+    for n in graph["nodes"]:
+        x, y = pos[n["id"]]
+        if n["type"] == "charm":
+            r = 34
+            out.append(
+                f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{r + 8}" '
+                f'fill="none" stroke="{CHARM_COLOR}" stroke-opacity="0.25" stroke-width="2"/>'
+            )
+            out.append(
+                f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{r}" fill="{BG_COLOR}" '
+                f'stroke="{CHARM_COLOR}" stroke-width="2.5"/>'
+            )
+            out.append(
+                f'<text x="{x:.0f}" y="{y - r - 14:.0f}" text-anchor="middle" '
+                f'fill="{TEXT_COLOR}" font-size="13" font-weight="600">'
+                f'{_svg_escape(n["name"])}</text>'
+            )
+            out.append(
+                f'<text x="{x:.0f}" y="{y + 4:.0f}" text-anchor="middle" '
+                f'fill="#9bb0c7" font-size="10">charm</text>'
+            )
+        else:
+            r = 18
+            color = ROLE_COLORS.get(n.get("role"), "#888888")
+            out.append(
+                f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{r}" fill="{color}" '
+                f'stroke="{color}" stroke-width="1.5"/>'
+            )
+            out.append(
+                f'<text x="{x:.0f}" y="{y + r + 13:.0f}" text-anchor="middle" '
+                f'fill="{TEXT_COLOR}" font-size="12" font-weight="600">'
+                f'{_svg_escape(n["name"])}</text>'
+            )
+            iface = n.get("interface") or ""
+            if iface:
+                out.append(
+                    f'<text x="{x:.0f}" y="{y + r + 26:.0f}" text-anchor="middle" '
+                    f'fill="#9bb0c7" font-size="10">iface: {_svg_escape(iface)}</text>'
+                )
+
+    out.append("</svg>")
+    return "\n".join(out) + "\n"
+
+
+def render(models: list[CharmModel], title: str, fmt: str = "html") -> str:
+    graph = _graph_for_render(models)
+    if fmt == "html":
+        return _render_html(graph, title)
+    if fmt == "json":
+        return _render_json(graph, title)
+    if fmt == "dot":
+        return _render_dot(graph, title)
+    if fmt == "mermaid":
+        return _render_mermaid(graph, title)
+    if fmt == "svg":
+        return _render_svg(graph, title)
+    raise ValueError(f"unsupported format: {fmt!r}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -819,9 +1124,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("charm_dir", nargs="?", help="Path to a charm directory (one with metadata.yaml or charmcraft.yaml).")
     p.add_argument("--all", dest="all_dir", metavar="DIR", help="Scan DIR for charm directories and render all of them in one graph.")
-    p.add_argument("-o", "--output", default="charm-graph.html", help="Output HTML file (default: charm-graph.html).")
-    p.add_argument("--title", default=None, help="Title for the HTML page (default: charm name).")
-    p.add_argument("--print-model", action="store_true", help="Print the inspected charm model as JSON and exit (no HTML).")
+    p.add_argument("-o", "--output", default=None, help="Output file (default: charm-graph.<ext> matching --format).")
+    p.add_argument("--title", default=None, help="Title for the output (default: charm name).")
+    p.add_argument("--print-model", action="store_true", help="Print the inspected charm model as JSON and exit (no output file).")
+    p.add_argument(
+        "--format",
+        choices=SUPPORTED_FORMATS,
+        default="html",
+        help="Output format: html (default, interactive), json (raw graph), "
+        "dot (Graphviz), mermaid (Mermaid flowchart), or svg (static graph).",
+    )
     args = p.parse_args(argv)
 
     models: list[CharmModel] = []
@@ -857,12 +1169,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     title = args.title or (models[0]["name"] if len(models) == 1 else f"{len(models)} charms")
-    html_str = render(models, title)
-    out = Path(args.output)
-    out.write_text(html_str, encoding="utf-8")
+    out_str = render(models, title, fmt=args.format)
+    out = Path(args.output) if args.output else Path(f"charm-graph{DEFAULT_OUTPUT_EXT[args.format]}")
+    out.write_text(out_str, encoding="utf-8")
     size_kb = out.stat().st_size / 1024
     sys.stdout.write(
-        f"Wrote {out} ({size_kb:.0f} KB)  ·  {len(models)} charm(s)  ·  "
+        f"Wrote {out} ({size_kb:.0f} KB)  ·  {len(models)} charm(s)  ·  format={args.format}  ·  "
         f"open with:  xdg-open {out}\n"
     )
     return 0

@@ -16,6 +16,7 @@ Given the path to a charm directory (one containing a `metadata.yaml` or `charmc
 - **Click for a summary** — click a charm node to see its summary, description, and relations; click a relation node to see its endpoint, role, interface, limit, scope, and owning charm.
 - **Self-contained output** — the HTML file inlines D3.js (vendored locally in `vendor/`) and all data, so it works fully offline and can be shared/emailed as a single file.
 - **Multi-charm mode** — point `--all` at a directory tree and every charm found is rendered in one combined graph, each in its own cluster.
+- **Multiple output formats** — in addition to the default interactive HTML, the same graph can be emitted as JSON (raw model), DOT (Graphviz), Mermaid (flowchart, renders inline on GitHub), or a static SVG. Use `--format` to pick.
 
 ## Requirements
 
@@ -35,6 +36,12 @@ python3 visualize_charm.py --all path/to/charms-dir -o all.html
 
 # Inspect the parsed model without rendering HTML
 python3 visualize_charm.py path/to/my-charm --print-model
+
+# Export in other formats
+python3 visualize_charm.py path/to/my-charm --format dot     # → charm-graph.dot (Graphviz)
+python3 visualize_charm.py path/to/my-charm --format mermaid  # → charm-graph.mmd (renders on GitHub)
+python3 visualize_charm.py path/to/my-charm --format svg      # → charm-graph.svg (static graph)
+python3 visualize_charm.py path/to/my-charm --format json     # → charm-graph.json (raw graph)
 
 # Open the result
 xdg-open graph.html
@@ -56,13 +63,25 @@ python3 visualize_charm.py --all sample-charms -o sample.html && xdg-open sample
 
 ## Output
 
-A single HTML file containing:
+The default `--format html` (or no `--format`) writes a single HTML file containing:
 
 - An inline copy of D3.js v7
 - The charm model embedded as JSON
 - A force-directed SVG graph with toggle-visibility and click-to-inspect behaviour
 
 No web server required — just open the file in any modern browser.
+
+Other formats (selected via `--format`) are useful for embedding, version-controlling, or piping through other tooling:
+
+| Format | Extension | Notes |
+| --- | --- | --- |
+| `html` (default) | `.html` | Interactive, self-contained, offline-capable. |
+| `json` | `.json` | The raw graph (`nodes` / `links` / `charms`) plus `title`. |
+| `dot` | `.dot` | Graphviz — `dot -Tpng graph.dot -o graph.png`. |
+| `mermaid` | `.mmd` | Mermaid flowchart; renders inline on GitHub and in many Markdown viewers. |
+| `svg` | `.svg` | Static SVG with a deterministic radial layout (no JS, no layout engine required). |
+
+If `-o` is omitted the output filename defaults to `charm-graph.<ext>` for the chosen format.
 
 ## Layout
 
