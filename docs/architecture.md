@@ -6,11 +6,13 @@ contributors find their way around the code.
 ## At a glance
 
 ```
-visualize_charm.py     # the entire tool (single file, ~1370 lines)
+visualize_charm.py       # the entire tool (single file, ~1370 lines)
 test_visualize_charm.py  # unit tests (unittest)
-vendor/d3.v7.min.js    # vendored D3.js v7, inlined into HTML output
-sample-charms/         # real charm directories used by the test suite
-docs/                   # this file
+vendor/d3.v7.min.js      # vendored D3.js v7, inlined into HTML output
+sample-charms/           # real charm directories used by the test suite
+docs/architecture.md     # this file
+AGENTS.md                # project-level guidance for opencode agents
+README.md                # user-facing documentation
 ```
 
 The tool is intentionally a **single-file Python script** with one
@@ -51,12 +53,12 @@ a banner comment:
 
 | Section | Lines (approx.) | Key functions |
 |---|---|---|
-| Imports + constants | 38-65 | `__version__`, `VENDOR_D3`, `D3_CDN_URL` |
+| Imports + constants | 38-66 | `__version__`, `VENDOR_D3`, `D3_CDN_URL` |
 | Charm inspection | 68-183 | `CharmInspectionError`, `CharmModel`, `_read_metadata`, `_build_relations`, `inspect_charm`, `is_charm_dir` |
-| Graph construction | 185-301 | `build_graph`, `build_combined_graph` |
-| HTML rendering | 304-780 | `_load_d3`, `_render_html`, `_HTML_TEMPLATE` |
-| CLI helpers | 783-797 | `_find_charm_dirs`, `render` (dispatch), `main` |
-| Other output formats | 800-1280 | colour constants, `_render_dot`, `_render_mermaid`, `_render_json`, `_render_svg`, `_compute_static_positions` |
+| Graph construction | 186-301 | `build_graph`, `build_combined_graph` |
+| HTML rendering | 304-940 | `_load_d3`, `_render_html`, `_HTML_TEMPLATE` (CSS + JS for the interactive view) |
+| CLI | 943-955 | `_find_charm_dirs` |
+| Other output formats + CLI dispatch | 958-1370 | colour constants, `_render_dot`, `_render_mermaid`, `_render_json`, `_render_svg`, `_compute_static_positions`, `render`, `main` |
 
 > Line numbers shift as the file grows — search for the banner comments
 > (`# ----...`) to find a section.
