@@ -648,7 +648,7 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
       </div>
       <div class="card charm-toggles" id="charm-toggles">
         <h2>Charms</h2>
-        <input class="charm-search" id="charm-search" type="search" placeholder="Filter charms…" autocomplete="off"/>
+        <input class="charm-search" id="charm-search" type="search" placeholder="Search charms & interfaces…" autocomplete="off"/>
         <div id="charm-toggle-list"></div>
       </div>
       <div class="card issues-card" id="issues-card" style="display:none;">
@@ -898,6 +898,8 @@ d3.select("#btn-help").on("click", () => {
     '<li><b>Drag nodes</b>: click and drag a node to reposition it.</li>'+
     '<li><b>Inspect</b>: click a charm or relation node to see its details in this panel.</li>'+
     '<li><b>Toggle charms</b>: use the checkboxes in the "Charms" list (top-left) to show or hide each charm one at a time. Hidden charms and their relations/integrations disappear from the graph.</li>'+
+    '<li><b>Search</b>: type in the search box to filter the charm list AND highlight matching nodes in the canvas (by charm name, endpoint name, or interface). Non-matching nodes are dimmed.</li>'+
+    '<li><b>Hover</b>: hover a node to highlight it and its connected neighbours/edges; everything else dims temporarily.</li>'+
     '<li><b>Show all</b>: re-enable every charm at once.</li>'+
     '<li><b>Hide unconnected</b>: hides requires/provides relations that aren&#39;t part of an integration with another visible charm. Click again to show them.</li>'+
     '<li><b>Colours</b>: charm nodes share a uniform blue ring; relation nodes are coloured by role — pink=requires, green=provides, gold=peers.</li>'+
@@ -929,16 +931,79 @@ function syncToggles() {
   toggleList.selectAll("input").property("checked", (d, i) => charmVisible.get(i));
 }
 
-// ---- Charm search/filter ----
+// ---- Charm search/filter + in-graph highlight ----
 const charmSearch = d3.select("#charm-search");
+
+// Build neighbour map for hover highlight
+const neighbours = new Map();
+links.forEach(l => {
+  const s = typeof l.source === "object" ? l.source.id : l.source;
+  const t = typeof l.target === "object" ? l.target.id : l.target;
+  if (!neighbours.has(s)) neighbours.set(s, new Set());
+  if (!neighbours.has(t)) neighbours.set(t, new Set());
+  neighbours.get(s).add(t);
+  neighbours.get(t).add(s);
+});
+
+function nodeMatchesSearch(d, q) {
+  if (d.name && d.name.toLowerCase().indexOf(q) !== -1) return true;
+  if (d.interface && d.interface.toLowerCase().indexOf(q) !== -1) return true;
+  const charmName = CHARMS[d.charm_index] ? CHARMS[d.charm_index].name : "";
+  if (charmName && charmName.toLowerCase().indexOf(q) !== -1) return true;
+  return false;
+}
+
+function defaultLinkOpacity(l) {
+  return d3.select(this).classed("integration") ? 0.7 : 0.5;
+}
+
+function resetOpacity() {
+  node.transition().duration(150).style("opacity", 1);
+  link.transition().duration(150).style("opacity", defaultLinkOpacity);
+}
+
+function applySearchFilter() {
+  if (activeLintWarning) return;
+  const q = charmSearch.property("value").trim().toLowerCase();
+  if (!q) { resetOpacity(); return; }
+  node.transition().duration(150).style("opacity", d => nodeMatchesSearch(d, q) ? 1 : 0.1);
+  link.transition().duration(150).style("opacity", function(l) {
+    const sm = typeof l.source === "object" ? l.source : nodeById.get(l.source);
+    const tm = typeof l.target === "object" ? l.target : nodeById.get(l.target);
+    return (nodeMatchesSearch(sm, q) || nodeMatchesSearch(tm, q)) ? 0.6 : 0.03;
+  });
+}
+
 function filterCharms() {
   const q = charmSearch.property("value").trim().toLowerCase();
   toggleList.selectAll("label").style("display", function(c) {
     if (!q) return null;
     return c.name.toLowerCase().indexOf(q) !== -1 ? null : "none";
   });
+  applySearchFilter();
 }
 charmSearch.on("input", filterCharms);
+
+// ---- Hover highlight ----
+function hoverHighlight(d) {
+  if (activeLintWarning) return;
+  const nSet = neighbours.get(d.id) || new Set();
+  nSet.add(d.id);
+  node.transition().duration(100).style("opacity", n => nSet.has(n.id) ? 1 : 0.1);
+  link.transition().duration(100).style("opacity", function(l) {
+    const sid = typeof l.source === "object" ? l.source.id : l.source;
+    const tid = typeof l.target === "object" ? l.target.id : l.target;
+    return (nSet.has(sid) && nSet.has(tid)) ? 0.8 : 0.03;
+  });
+}
+
+function hoverRestore() {
+  if (activeLintWarning) return;
+  applySearchFilter();
+}
+
+node.on("mouseenter", (event, d) => hoverHighlight(d))
+    .on("mouseleave", () => hoverRestore());
 
 // ---- Title card ----
 const integrationCount = links.filter(l => l.kind === "integration").length;
@@ -974,8 +1039,7 @@ function findNodesForWarning(w) {
 function clearLintHighlight() {
   if (!activeLintWarning) return;
   activeLintWarning = null;
-  node.transition().duration(200).style("opacity", 1);
-  link.transition().duration(200).style("opacity", function() { return d3.select(this).classed("integration") ? 0.7 : 0.5; });
+  applySearchFilter();
   issuesList.selectAll(".issue-row").classed("active", false);
 }
 
