@@ -6,7 +6,7 @@ contributors find their way around the code.
 ## At a glance
 
 ```
-visualize_charm.py       # the entire tool (single file, ~1370 lines)
+visualize_charm.py       # the entire tool (single file, ~1610 lines)
 test_visualize_charm.py  # unit tests (unittest)
 vendor/d3.v7.min.js      # vendored D3.js v7, inlined into HTML output
 sample-charms/           # real charm directories used by the test suite
@@ -74,10 +74,10 @@ a banner comment:
 | Imports + constants | 38-66 | `__version__`, `VENDOR_D3`, `D3_CDN_URL` |
 | Charm inspection | 68-183 | `CharmInspectionError`, `CharmModel`, `_read_metadata`, `_build_relations`, `inspect_charm`, `is_charm_dir` |
 | Graph construction | 186-301 | `build_graph`, `build_combined_graph` |
-| Lint / diagnostics | 304-420 | `LintWarning`, `lint_charms`, `format_lint_warnings` |
-| HTML rendering | 421-1057 | `_load_d3`, `_render_html`, `_HTML_TEMPLATE` (CSS + JS for the interactive view) |
-| CLI | 1060-1072 | `_find_charm_dirs` |
-| Other output formats + CLI dispatch | 1075-1520 | colour constants, `_render_dot`, `_render_mermaid`, `_render_json`, `_render_svg`, `_compute_static_positions`, `render`, `main` |
+| Lint / diagnostics | 304-418 | `LintWarning`, `lint_charms`, `format_lint_warnings` |
+| HTML rendering | 421-1148 | `_load_d3`, `_render_html`, `_HTML_TEMPLATE` (CSS + JS for the interactive view, including lint panel and in-browser export) |
+| CLI | 1151-1163 | `_find_charm_dirs` |
+| Other output formats + CLI dispatch | 1166-1612 | colour constants, `_render_dot`, `_render_mermaid`, `_render_json`, `_render_svg`, `_compute_static_positions`, `render`, `main` |
 
 > Line numbers shift as the file grows — search for the banner comments
 > (`# ----...`) to find a section.

@@ -157,6 +157,46 @@ class CombinedGraphTests(unittest.TestCase):
         self.assertIn("XMLSerializer", rendered)
         self.assertIn("toBlob", rendered)
 
+    def test_rendered_html_contains_lint_issues_panel(self):
+        """The HTML template must have the Issues panel and lint JS."""
+        rendered = visualizer._render_html(self.graph, "Sample charms")
+        self.assertIn('id="issues-card"', rendered)
+        self.assertIn('id="issues-list"', rendered)
+        self.assertIn("LINT_WARNINGS", rendered)
+        self.assertIn("highlightLintWarning", rendered)
+        self.assertIn("clearLintHighlight", rendered)
+        self.assertIn("findNodesForWarning", rendered)
+
+    def test_rendered_html_contains_lint_warnings_data(self):
+        """When rendered via render(), GRAPH_DATA must contain lint_warnings."""
+        orphan = _charm("solo", requires={"db": "mysql"})
+        rendered = visualizer.render([orphan], "solo", fmt="html")
+        # The lint warning should be embedded in the data.
+        self.assertIn("lint_warnings", rendered)
+        self.assertIn("orphan", rendered)
+        self.assertIn("no charm provides it", rendered)
+
+    def test_rendered_html_lint_panel_hidden_when_no_warnings(self):
+        """When there are no lint warnings, the issues card is removed by JS."""
+        matched = [
+            _charm("app", requires={"db": "mysql"}),
+            _charm("db", provides={"db": "mysql"}),
+        ]
+        rendered = visualizer.render(matched, "matched", fmt="html")
+        self.assertIn("lint_warnings", rendered)
+        self.assertIn("issuesCard.remove", rendered)
+
+    def test_rendered_html_lint_badge_on_title_card(self):
+        """The title card should show an issue badge when warnings exist."""
+        orphan = _charm("solo", requires={"db": "mysql"})
+        rendered = visualizer.render([orphan], "solo", fmt="html")
+        self.assertIn("issue-badge", rendered)
+        self.assertIn("issue(s)", rendered)
+
+    def test_rendered_html_contains_lint_help_text(self):
+        rendered = visualizer._render_html(self.graph, "Sample charms")
+        self.assertIn("Issues</b>", rendered)
+
     def test_unconnected_relation_has_no_integration_link(self):
         lone = _charm("solo", requires={"db": "mysql"})
         graph = visualizer.build_combined_graph([lone])

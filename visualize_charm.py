@@ -547,6 +547,30 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
     color: var(--text-dim); text-decoration: line-through;
   }
 
+  /* Issues / lint panel */
+  .issues-card { max-height: 35vh; overflow-y: auto; min-width: 220px; }
+  .issues-card:empty { display: none; }
+  .issue-row {
+    cursor: pointer; padding: 4px 6px; margin: 3px 0; border-radius: 5px;
+    background: rgba(13,27,42,0.5); border: 1px solid transparent;
+    font-size: 11px; line-height: 1.4; transition: background .15s, border-color .15s;
+  }
+  .issue-row:hover { background: rgba(35,58,90,0.7); border-color: var(--panel-border); }
+  .issue-row.active { border-color: var(--accent); background: rgba(35,58,90,0.8); }
+  .issue-kind {
+    display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px;
+    border-radius: 3px; margin-right: 4px; text-transform: uppercase;
+    letter-spacing: .5px; vertical-align: middle;
+  }
+  .issue-kind.orphan { background: #4a2a3a; color: #f72585; }
+  .issue-kind.duplicate-provider { background: #3a3a1a; color: #ffd166; }
+  .issue-kind.limit-exceeded { background: #3a2a1a; color: #ff9e3d; }
+  .issue-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
+    border-radius: 8px; background: #4a2a3a; color: #f72585; margin-left: 6px;
+    vertical-align: middle;
+  }
+
   /* Side panel */
   #panel {
     width: 380px; min-width: 320px; max-width: 460px;
@@ -626,6 +650,10 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
         <h2>Charms</h2>
         <input class="charm-search" id="charm-search" type="search" placeholder="Filter charms…" autocomplete="off"/>
         <div id="charm-toggle-list"></div>
+      </div>
+      <div class="card issues-card" id="issues-card" style="display:none;">
+        <h2>Issues</h2>
+        <div id="issues-list"></div>
       </div>
       <div class="card legend">
         <h2>Legend</h2>
@@ -797,7 +825,7 @@ node.on("click", (event, d) => {
   if (d.type === "charm") showCharmPanel(d);
   else if (d.type === "relation") showRelationPanel(d);
 });
-svg.on("click", () => closePanel());
+svg.on("click", () => { closePanel(); clearLintHighlight(); });
 
 // ---- Side panel ----
 const panel = d3.select("#panel");
@@ -875,6 +903,7 @@ d3.select("#btn-help").on("click", () => {
     '<li><b>Colours</b>: charm nodes share a uniform blue ring; relation nodes are coloured by role — pink=requires, green=provides, gold=peers.</li>'+
     '<li><b>Subordinate charms</b>: drawn with a dashed ring and a "subordinate" sub-label; their container-scope relations use a dashed edge.</li>'+
     '<li><b>Integrations</b>: gold links connect relations across charms that share a Juju interface (requires&lt;-&gt;provides).</li>'+
+    '<li><b>Issues</b>: the "Issues" panel lists detected integration problems (orphan endpoints, duplicate providers, limit over-subscription). Click a warning to highlight the affected nodes; click the background to clear.</li>'+
     '<li><b>Export</b>: use the ↓ SVG / ↓ PNG / ↓ JSON buttons to download the current graph (respecting charm visibility and hide-unconnected) as a self-contained SVG, PNG, or JSON file.</li>'+
     '</ul>'
   );
@@ -921,6 +950,69 @@ if (CHARMS.length > 1) {
   const c = CHARMS[0];
   d3.select("#tc-title").text(c.name);
   d3.select("#tc-sub").text(c.stats.relations + " relations · " + integrationCount + " integrations");
+}
+
+// ---- Lint warnings panel ----
+const LINT_WARNINGS = GRAPH_DATA.lint_warnings || [];
+const issuesCard = d3.select("#issues-card");
+const issuesList = d3.select("#issues-list");
+let activeLintWarning = null;
+
+function findNodesForWarning(w) {
+  const charmName = w.charm;
+  let endpoints = w.endpoint || "";
+  endpoints = endpoints.indexOf(",") !== -1
+    ? endpoints.split(", ").map(s => s.trim())
+    : [endpoints];
+  return nodes.filter(n =>
+    n.type === "relation" &&
+    CHARMS[n.charm_index] && CHARMS[n.charm_index].name === charmName &&
+    endpoints.indexOf(n.name) !== -1
+  );
+}
+
+function clearLintHighlight() {
+  if (!activeLintWarning) return;
+  activeLintWarning = null;
+  node.transition().duration(200).style("opacity", 1);
+  link.transition().duration(200).style("opacity", function() { return d3.select(this).classed("integration") ? 0.7 : 0.5; });
+  issuesList.selectAll(".issue-row").classed("active", false);
+}
+
+function highlightLintWarning(w) {
+  if (activeLintWarning === w) { clearLintHighlight(); return; }
+  activeLintWarning = w;
+  const targets = findNodesForWarning(w);
+  const targetIds = new Set(targets.map(n => n.id));
+  const targetCharmIdx = new Set(targets.map(n => n.charm_index));
+  node.transition().duration(200).style("opacity", d =>
+    (targetIds.has(d.id) || (d.type === "charm" && targetCharmIdx.has(d.charm_index))) ? 1 : 0.15);
+  link.transition().duration(200).style("opacity", l => {
+    const sid = typeof l.source === "object" ? l.source.id : l.source;
+    const tid = typeof l.target === "object" ? l.target.id : l.target;
+    return (targetIds.has(sid) || targetIds.has(tid)) ? 0.8 : 0.05;
+  });
+  issuesList.selectAll(".issue-row").classed("active", d => d === w);
+}
+
+if (LINT_WARNINGS.length > 0) {
+  issuesCard.style("display", null);
+  issuesList.selectAll("div")
+    .data(LINT_WARNINGS)
+    .join("div")
+    .attr("class", "issue-row")
+    .each(function(w) {
+      const row = d3.select(this);
+      const kc = w.kind || "";
+      row.append("span").attr("class", "issue-kind " + kc).text(w.kind);
+      row.append("span").text(w.message);
+    })
+    .on("click", function(event, w) { event.stopPropagation(); highlightLintWarning(w); });
+  d3.select("#tc-title").append("span")
+    .attr("class", "issue-badge")
+    .text(LINT_WARNINGS.length + " issue(s)");
+} else {
+  issuesCard.remove();
 }
 
 // gentle centering after a moment
@@ -1422,6 +1514,7 @@ def _render_svg(graph: dict, title: str) -> str:
 def render(models: list[CharmModel], title: str, fmt: str = "html") -> str:
     graph = _graph_for_render(models)
     if fmt == "html":
+        graph["lint_warnings"] = lint_charms(models)
         return _render_html(graph, title)
     if fmt == "json":
         return _render_json(graph, title)

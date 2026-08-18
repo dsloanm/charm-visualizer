@@ -20,7 +20,7 @@ Given the path to a charm directory (one containing a `metadata.yaml` or `charmc
 - **Multiple output formats** — in addition to the default interactive HTML, the same graph can be emitted as JSON (raw model), DOT (Graphviz), Mermaid (flowchart, renders inline on GitHub), or a static SVG. Use `--format` to pick.
 - **In-browser export** — download the current graph (respecting charm visibility and hide-unconnected state) as SVG, PNG, or JSON directly from the HTML view via the ↓ buttons.
 - **Charm search/filter** — a search box in the charm toggle list filters charms by name, useful for graphs with many charms.
-- **Lint mode** — `--lint` checks for integration issues: orphan endpoints (requires/provides with no matching counterpart), duplicate-interface providers (a charm providing the same interface on multiple endpoints), and `limit` over-subscription. Use `--strict` to exit non-zero, suitable for CI.
+- **Lint mode** — `--lint` checks for integration issues: orphan endpoints (requires/provides with no matching counterpart), duplicate-interface providers (a charm providing the same interface on multiple endpoints), and `limit` over-subscription. Use `--strict` to exit non-zero, suitable for CI. Warnings are also surfaced as an interactive "Issues" panel in the HTML view with click-to-highlight.
 
 ## Requirements
 
