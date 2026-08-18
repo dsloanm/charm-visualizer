@@ -20,6 +20,7 @@ Given the path to a charm directory (one containing a `metadata.yaml` or `charmc
 - **Multiple output formats** — in addition to the default interactive HTML, the same graph can be emitted as JSON (raw model), DOT (Graphviz), Mermaid (flowchart, renders inline on GitHub), or a static SVG. Use `--format` to pick.
 - **In-browser export** — download the current graph (respecting charm visibility and hide-unconnected state) as SVG, PNG, or JSON directly from the HTML view via the ↓ buttons.
 - **Charm search/filter** — a search box in the charm toggle list filters charms by name, useful for graphs with many charms.
+- **Lint mode** — `--lint` checks for integration issues: orphan endpoints (requires/provides with no matching counterpart), duplicate-interface providers (a charm providing the same interface on multiple endpoints), and `limit` over-subscription. Use `--strict` to exit non-zero, suitable for CI.
 
 ## Requirements
 
@@ -39,6 +40,12 @@ python3 visualize_charm.py --all path/to/charms-dir -o all.html
 
 # Inspect the parsed model without rendering HTML
 python3 visualize_charm.py path/to/my-charm --print-model
+
+# Check for integration issues (orphan endpoints, duplicate providers, limit over-subscription)
+python3 visualize_charm.py --all path/to/charms-dir --lint
+
+# Same, but exit non-zero if any warnings are found (for CI)
+python3 visualize_charm.py --all path/to/charms-dir --lint --strict
 
 # Export in other formats
 python3 visualize_charm.py path/to/my-charm --format dot     # → charm-graph.dot (Graphviz)

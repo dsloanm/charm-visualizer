@@ -7,13 +7,16 @@ import visualize_charm as visualizer
 SAMPLE_CHARMS = Path(__file__).parent / "sample-charms"
 
 
-def _charm(name, requires=None, provides=None, peers=None, subordinate=False, scopes=None):
+def _charm(name, requires=None, provides=None, peers=None, subordinate=False, scopes=None, limits=None):
     """Build a minimal CharmModel with the given relations.
 
     ``scopes`` optionally maps endpoint names to a relation scope (e.g.
     ``"container"``); endpoints not listed default to ``None``.
+
+    ``limits`` optionally maps endpoint names to an integer limit.
     """
     scopes = scopes or {}
+    limits = limits or {}
     relations = []
     for role, section in (
         ("requires", requires or {}),
@@ -26,7 +29,7 @@ def _charm(name, requires=None, provides=None, peers=None, subordinate=False, sc
                     "endpoint": endpoint,
                     "role": role,
                     "interface": interface,
-                    "limit": None,
+                    "limit": limits.get(endpoint),
                     "scope": scopes.get(endpoint),
                     "optional": False,
                 }
@@ -494,6 +497,125 @@ class SubordinateTests(unittest.TestCase):
             if "filesystem" in l["target"] and l.get("scope") == "container"
         )
         self.assertEqual(fs_link.get("scope"), "container")
+
+
+class LintTests(unittest.TestCase):
+    """Tests for the --lint diagnostic mode."""
+
+    def test_no_warnings_when_all_endpoints_matched(self):
+        models = [
+            _charm("app", requires={"db": "mysql"}),
+            _charm("db", provides={"db": "mysql"}),
+        ]
+        warnings = visualizer.lint_charms(models)
+        self.assertEqual(warnings, [])
+
+    def test_orphan_requires_detected(self):
+        models = [_charm("solo", requires={"db": "mysql"})]
+        warnings = visualizer.lint_charms(models)
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0]["kind"], "orphan")
+        self.assertEqual(warnings[0]["charm"], "solo")
+        self.assertEqual(warnings[0]["endpoint"], "db")
+        self.assertIn("no charm provides it", warnings[0]["message"])
+
+    def test_orphan_provides_detected(self):
+        models = [_charm("solo", provides={"db": "mysql"})]
+        warnings = visualizer.lint_charms(models)
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0]["kind"], "orphan")
+        self.assertIn("no charm requires it", warnings[0]["message"])
+
+    def test_duplicate_provider_detected(self):
+        models = [
+            _charm("integrator", provides={"smtp": "smtp", "smtp-legacy": "smtp"}),
+        ]
+        warnings = visualizer.lint_charms(models)
+        dup = [w for w in warnings if w["kind"] == "duplicate-provider"]
+        self.assertEqual(len(dup), 1)
+        self.assertEqual(dup[0]["charm"], "integrator")
+        self.assertIn("smtp", dup[0]["endpoint"])
+        self.assertIn("smtp-legacy", dup[0]["endpoint"])
+
+    def test_limit_not_exceeded_when_within_limit(self):
+        models = [
+            _charm("db", provides={"db": "mysql"}, limits={"db": 2}),
+            _charm("app1", requires={"db": "mysql"}),
+        ]
+        warnings = visualizer.lint_charms(models)
+        limit_warnings = [w for w in warnings if w["kind"] == "limit-exceeded"]
+        self.assertEqual(limit_warnings, [])
+
+    def test_limit_exceeded_when_over_limit(self):
+        models = [
+            _charm("db", provides={"db": "mysql"}, limits={"db": 1}),
+            _charm("app1", requires={"db": "mysql"}),
+            _charm("app2", requires={"db": "mysql"}),
+        ]
+        warnings = visualizer.lint_charms(models)
+        limit_warnings = [w for w in warnings if w["kind"] == "limit-exceeded"]
+        self.assertEqual(len(limit_warnings), 1)
+        self.assertEqual(limit_warnings[0]["charm"], "db")
+        self.assertIn("limit 1", limit_warnings[0]["message"])
+        self.assertIn("2 charm(s)", limit_warnings[0]["message"])
+
+    def test_peers_are_not_linted_as_orphans(self):
+        models = [_charm("solo", peers={"cluster": "cluster"})]
+        warnings = visualizer.lint_charms(models)
+        self.assertEqual(warnings, [])
+
+    def test_format_lint_warnings_empty(self):
+        out = visualizer.format_lint_warnings([])
+        self.assertIn("No issues found", out)
+
+    def test_format_lint_warnings_nonempty(self):
+        warnings = visualizer.lint_charms([_charm("solo", requires={"db": "mysql"})])
+        out = visualizer.format_lint_warnings(warnings)
+        self.assertIn("[ORPHAN]", out)
+        self.assertIn("1 warning(s)", out)
+
+    def test_lint_finds_issues_in_sample_charms(self):
+        models = [
+            visualizer.inspect_charm(path)
+            for path in visualizer._find_charm_dirs(SAMPLE_CHARMS)
+        ]
+        warnings = visualizer.lint_charms(models)
+        self.assertGreater(len(warnings), 0)
+        kinds = {w["kind"] for w in warnings}
+        self.assertIn("orphan", kinds)
+        # smtp-integrator has duplicate provides on interface 'smtp'
+        self.assertIn("duplicate-provider", kinds)
+
+    def test_cli_lint_mode_exits_zero_without_strict(self):
+        models_dir = str(SAMPLE_CHARMS)
+        rc = visualizer.main(["--all", models_dir, "--lint"])
+        self.assertEqual(rc, 0)
+
+    def test_cli_lint_strict_exits_nonzero_with_warnings(self):
+        models_dir = str(SAMPLE_CHARMS)
+        rc = visualizer.main(["--all", models_dir, "--lint", "--strict"])
+        self.assertNotEqual(rc, 0)
+
+    def test_cli_lint_strict_exits_zero_without_warnings(self):
+        models = [
+            _charm("app", requires={"db": "mysql"}),
+            _charm("db", provides={"db": "mysql"}),
+        ]
+        import tempfile, json, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for m in models:
+                cdir = Path(tmpdir) / m["name"]
+                cdir.mkdir()
+                meta = {"name": m["name"]}
+                for r in m["relations"]:
+                    meta.setdefault(r["role"], {})[r["endpoint"]] = {
+                        "interface": r["interface"]
+                    }
+                (cdir / "metadata.yaml").write_text(
+                    __import__("yaml").dump(meta), encoding="utf-8"
+                )
+            rc = visualizer.main(["--all", tmpdir, "--lint", "--strict"])
+            self.assertEqual(rc, 0)
 
 
 if __name__ == "__main__":

@@ -302,6 +302,123 @@ def build_combined_graph(models: list[CharmModel]) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Lint / diagnostics
+# ---------------------------------------------------------------------------
+
+class LintWarning(dict):
+    """A single diagnostic warning. Keys: kind, charm, endpoint, message."""
+
+
+def lint_charms(models: list[CharmModel]) -> list[LintWarning]:
+    """Analyse charm models for potential integration issues.
+
+    Returns a list of ``LintWarning`` dicts. Each has:
+        kind    — "orphan", "duplicate-provider", or "limit-exceeded"
+        charm   — charm name (or None for cross-charm warnings)
+        endpoint — endpoint name (or None)
+        message — human-readable description
+
+    Checks performed:
+        orphan             — a requires/provides endpoint with no matching
+                             counterpart (no other charm has the same
+                             interface with complementary role).
+        duplicate-provider — a single charm with multiple provides endpoints
+                             on the same interface.
+        limit-exceeded     — a provides endpoint with ``limit: N`` where
+                             more than N charms require that interface.
+    """
+    warnings: list[LintWarning] = []
+
+    requires_by_iface: dict[str, list[tuple[str, dict]]] = {}
+    provides_by_iface: dict[str, list[tuple[str, dict]]] = {}
+    for model in models:
+        for rel in model["relations"]:
+            iface = rel["interface"]
+            if iface in (None, "—"):
+                continue
+            if rel["role"] == "requires":
+                requires_by_iface.setdefault(iface, []).append((model["name"], rel))
+            elif rel["role"] == "provides":
+                provides_by_iface.setdefault(iface, []).append((model["name"], rel))
+
+    all_ifaces = set(requires_by_iface) | set(provides_by_iface)
+    for iface in sorted(all_ifaces):
+        reqs = requires_by_iface.get(iface, [])
+        provs = provides_by_iface.get(iface, [])
+
+        # Orphan endpoints: requires with no provides, and vice versa.
+        if not provs:
+            for charm_name, rel in reqs:
+                warnings.append(LintWarning(
+                    kind="orphan",
+                    charm=charm_name,
+                    endpoint=rel["endpoint"],
+                    message=f"{charm_name}:{rel['endpoint']} requires interface "
+                            f"'{iface}' but no charm provides it",
+                ))
+        if not reqs:
+            for charm_name, rel in provs:
+                warnings.append(LintWarning(
+                    kind="orphan",
+                    charm=charm_name,
+                    endpoint=rel["endpoint"],
+                    message=f"{charm_name}:{rel['endpoint']} provides interface "
+                            f"'{iface}' but no charm requires it",
+                ))
+
+        # Duplicate providers: a single charm with multiple provides on the
+        # same interface.
+        prov_charm_counts: dict[str, list[dict]] = {}
+        for charm_name, rel in provs:
+            prov_charm_counts.setdefault(charm_name, []).append(rel)
+        for charm_name, rels in prov_charm_counts.items():
+            if len(rels) > 1:
+                endpoints = ", ".join(r["endpoint"] for r in rels)
+                warnings.append(LintWarning(
+                    kind="duplicate-provider",
+                    charm=charm_name,
+                    endpoint=endpoints,
+                    message=f"{charm_name} provides interface '{iface}' on multiple "
+                            f"endpoints: {endpoints}",
+                ))
+
+        # Limit over-subscription: a provides endpoint with limit:N where
+        # more than N charms require that interface.
+        for charm_name, rel in provs:
+            limit = rel.get("limit")
+            if limit is None or not isinstance(limit, int):
+                continue
+            num_requirers = len({c for c, _ in reqs})
+            if num_requirers > limit:
+                warnings.append(LintWarning(
+                    kind="limit-exceeded",
+                    charm=charm_name,
+                    endpoint=rel["endpoint"],
+                    message=f"{charm_name}:{rel['endpoint']} provides interface '{iface}' "
+                            f"with limit {limit} but {num_requirers} charm(s) require it",
+                ))
+
+    return warnings
+
+
+def format_lint_warnings(warnings: list[LintWarning]) -> str:
+    """Format lint warnings as a human-readable table for stderr/stdout."""
+    if not warnings:
+        return "No issues found.\n"
+    lines: list[str] = []
+    kind_label = {
+        "orphan": "ORPHAN",
+        "duplicate-provider": "DUPLICATE",
+        "limit-exceeded": "LIMIT",
+    }
+    for w in warnings:
+        label = kind_label.get(w["kind"], w["kind"].upper())
+        lines.append(f"  [{label}] {w['message']}")
+    lines.append(f"\n{len(warnings)} warning(s) found.")
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # HTML rendering
 # ---------------------------------------------------------------------------
 
@@ -1328,6 +1445,7 @@ def main(argv: list[str] | None = None) -> int:
               python3 visualize_charm.py ./sample-charms/my-wiki-operator
               python3 visualize_charm.py ./sample-charms -o all.html
               python3 visualize_charm.py --all ./sample-charms
+              python3 visualize_charm.py --all ./sample-charms --lint --strict
             """
         ),
     )
@@ -1336,6 +1454,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--output", default=None, help="Output file (default: charm-graph.<ext> matching --format).")
     p.add_argument("--title", default=None, help="Title for the output (default: charm name).")
     p.add_argument("--print-model", action="store_true", help="Print the inspected charm model as JSON and exit (no output file).")
+    p.add_argument("--lint", action="store_true", help="Check for integration issues (orphan endpoints, duplicate providers, limit over-subscription) and exit without rendering.")
+    p.add_argument("--strict", action="store_true", help="With --lint, exit non-zero if any warnings are found. No effect without --lint.")
     p.add_argument(
         "--format",
         choices=SUPPORTED_FORMATS,
@@ -1375,6 +1495,13 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(models[0], indent=2, default=str))
         else:
             print(json.dumps(models, indent=2, default=str))
+        return 0
+
+    if args.lint:
+        warnings = lint_charms(models)
+        sys.stdout.write(format_lint_warnings(warnings))
+        if args.strict and warnings:
+            return 1
         return 0
 
     title = args.title or (models[0]["name"] if len(models) == 1 else f"{len(models)} charms")

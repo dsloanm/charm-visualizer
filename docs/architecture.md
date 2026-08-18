@@ -44,7 +44,25 @@ charm directory  ──►  inspect_charm()  ──►  build_graph()  ──►
 
 The `main()` function wires these together: it finds charm directories
 (either one or via `--all`), inspects each, builds a graph, and writes
-the rendered output to a file.
+the rendered output to a file. With `--lint`, it instead calls
+`lint_charms()` and prints warnings without rendering.
+
+## Lint / diagnostics
+
+`lint_charms(models)` analyses the inspected charm models for potential
+integration issues and returns a list of `LintWarning` dicts. It checks:
+
+- **Orphan endpoints** — a `requires` or `provides` endpoint with no
+  matching counterpart (no other charm has the same interface with
+  complementary role).
+- **Duplicate providers** — a single charm with multiple `provides`
+  endpoints on the same interface (e.g. smtp-integrator's `smtp` +
+  `smtp-legacy`).
+- **Limit over-subscription** — a `provides` endpoint with `limit: N`
+  where more than N charms require that interface.
+
+`--strict` makes the CLI exit non-zero if any warnings are found,
+suitable for CI gates.
 
 ## Structure of visualize_charm.py
 
@@ -56,9 +74,10 @@ a banner comment:
 | Imports + constants | 38-66 | `__version__`, `VENDOR_D3`, `D3_CDN_URL` |
 | Charm inspection | 68-183 | `CharmInspectionError`, `CharmModel`, `_read_metadata`, `_build_relations`, `inspect_charm`, `is_charm_dir` |
 | Graph construction | 186-301 | `build_graph`, `build_combined_graph` |
-| HTML rendering | 304-940 | `_load_d3`, `_render_html`, `_HTML_TEMPLATE` (CSS + JS for the interactive view) |
-| CLI | 943-955 | `_find_charm_dirs` |
-| Other output formats + CLI dispatch | 958-1370 | colour constants, `_render_dot`, `_render_mermaid`, `_render_json`, `_render_svg`, `_compute_static_positions`, `render`, `main` |
+| Lint / diagnostics | 304-420 | `LintWarning`, `lint_charms`, `format_lint_warnings` |
+| HTML rendering | 421-1057 | `_load_d3`, `_render_html`, `_HTML_TEMPLATE` (CSS + JS for the interactive view) |
+| CLI | 1060-1072 | `_find_charm_dirs` |
+| Other output formats + CLI dispatch | 1075-1520 | colour constants, `_render_dot`, `_render_mermaid`, `_render_json`, `_render_svg`, `_compute_static_positions`, `render`, `main` |
 
 > Line numbers shift as the file grows — search for the banner comments
 > (`# ----...`) to find a section.

@@ -20,6 +20,9 @@ python3 -m unittest test_visualize_charm
 
 # Verify no syntax warnings under strict mode
 python3 -W error -m unittest test_visualize_charm
+
+# Lint charm set for integration issues (orphan endpoints, duplicate providers, limit over-subscription)
+python3 visualize_charm.py --all sample-charms --lint --strict
 ```
 
 There is no lint command configured yet. There is no build step — the
