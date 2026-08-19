@@ -146,6 +146,16 @@ class CombinedGraphTests(unittest.TestCase):
         self.assertIn("linkLabel", rendered)
         self.assertIn("link-labels", rendered)
 
+    def test_rendered_html_contains_theme_toggle(self):
+        """The HTML must include a theme toggle button and light theme CSS."""
+        rendered = visualizer._render_html(self.graph, "Sample charms")
+        self.assertIn('id="btn-theme"', rendered)
+        self.assertIn('data-theme="light"', rendered)
+        self.assertIn("toggleTheme", rendered)
+        self.assertIn("recolor", rendered)
+        self.assertIn("getExportBg", rendered)
+        self.assertIn("localStorage", rendered)
+
     def test_export_svg_xml_declaration_is_single_line(self):
         """Regression: the inline JS must not contain a literal newline inside
         the single-quoted <?xml ...?> string in exportSVG(), otherwise the
@@ -237,6 +247,35 @@ class CombinedGraphTests(unittest.TestCase):
             n for n in graph["nodes"] if n["type"] == "relation"
         )
         self.assertEqual(relation_node["role"], "requires")
+
+    def test_cluster_spacing_scales_with_relation_count(self):
+        """Cluster spacing should be larger for charms with more relations."""
+        sparse = _charm("a", requires={"x": "iface"})
+        dense = _charm(
+            "b",
+            requires={"r1": "i1", "r2": "i2", "r3": "i3",
+                      "r4": "i4", "r5": "i5", "r6": "i6",
+                      "r7": "i7", "r8": "i8", "r9": "i9", "r10": "i10"},
+        )
+        graph = visualizer.build_combined_graph([sparse, dense])
+        charm_nodes = [n for n in graph["nodes"] if n["type"] == "charm"]
+        self.assertEqual(len(charm_nodes), 2)
+        x0, x1 = charm_nodes[0]["x"], charm_nodes[1]["x"]
+        spacing = abs(x1 - x0)
+        # Dense charm has 10 relations, so spacing should be at least
+        # 120 * (10 + 2) = 1440, well above the old fixed 600.
+        self.assertGreater(spacing, 600,
+                           f"spacing {spacing} should exceed old fixed 600 for dense charms")
+
+    def test_cluster_spacing_floor_for_sparse_charms(self):
+        """Sparse charms should use the minimum spacing floor."""
+        a = _charm("a", requires={"x": "iface"})
+        b = _charm("b", provides={"x": "iface"})
+        graph = visualizer.build_combined_graph([a, b])
+        charm_nodes = [n for n in graph["nodes"] if n["type"] == "charm"]
+        spacing = abs(charm_nodes[1]["x"] - charm_nodes[0]["x"])
+        # 1 relation each → max_rels=1, spacing = max(450, 120*3) = 450
+        self.assertEqual(spacing, 450)
 
 
 class FormatRenderTests(unittest.TestCase):

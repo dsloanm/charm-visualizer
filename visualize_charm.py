@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import os
 import sys
 import textwrap
@@ -267,8 +268,12 @@ def build_combined_graph(models: list[CharmModel]) -> dict:
                     "scope": l.get("scope"),
                 }
             )
-        # offset cluster in x so they don't fully overlap
-        offset = (i - (len(models) - 1) / 2) * 600
+        # Offset each cluster in x so they don't overlap. Spacing scales
+        # with the max relation count across charms so dense clusters get
+        # more room than sparse ones.
+        max_rels = max((len(m["relations"]) for m in models), default=1)
+        spacing = max(450, 120 * (max_rels + 2))
+        offset = (i - (len(models) - 1) / 2) * spacing
         for n in all_nodes[-len(g["nodes"]):]:
             n["x"] = 400 + offset
             n["y"] = 300
@@ -470,11 +475,30 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
     --provides: #06d6a0;
     --peers: #ffd166;
     --integration: #ffd166;
+    --bg-gradient: #1a3350;
+    --link-relation: #3a5a7a;
+    --node-fill: #0d1b2a;
+  }
+  [data-theme="light"] {
+    --bg: #f0f4f8;
+    --bg2: #e3e8ef;
+    --panel: #ffffff;
+    --panel-border: #cbd5e0;
+    --text: #1a202c;
+    --text-dim: #64748b;
+    --accent: #0284c7;
+    --requires: #e11d48;
+    --provides: #059669;
+    --peers: #d97706;
+    --integration: #d97706;
+    --bg-gradient: #dbeafe;
+    --link-relation: #94a3b8;
+    --node-fill: #f8fafc;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; padding: 0; }
   body {
-    background: radial-gradient(circle at 30% 20%, #1a3350 0%, var(--bg) 60%);
+    background: radial-gradient(circle at 30% 20%, var(--bg-gradient) 0%, var(--bg) 60%);
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     overflow: hidden;
@@ -607,10 +631,10 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
   .node-label { fill: var(--text); font-size: 13px; font-weight: 600; }
   .node-sub { fill: var(--text-dim); font-size: 10px; }
   .link { stroke-opacity: 0.5; fill: none; }
-  .link.relation { stroke: #3a5a7a; stroke-width: 2; }
+  .link.relation { stroke: var(--link-relation); stroke-width: 2; }
   .link.relation.container { stroke-dasharray: 5 4; }
-  .link.integration { stroke: #ffd166; stroke-width: 3; stroke-opacity: 0.7; }
-  .link-label { fill: #ffd166; font-size: 10px; text-anchor: middle; pointer-events: none; user-select: none; paint-order: stroke; stroke: var(--bg); stroke-width: 3; }
+  .link.integration { stroke: var(--integration); stroke-width: 3; stroke-opacity: 0.7; }
+  .link-label { fill: var(--integration); font-size: 10px; text-anchor: middle; pointer-events: none; user-select: none; paint-order: stroke; stroke: var(--bg); stroke-width: 3; }
   .subordinate-ring { fill: none; stroke-dasharray: 4 3; }
 
   /* zoom hint */
@@ -644,6 +668,7 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
         <button class="btn" id="btn-all">⊕ Show all</button>
         <button class="btn" id="btn-hide-unconnected">◑ Show unconnected</button>
         <button class="btn" id="btn-help">? Help</button>
+        <button class="btn" id="btn-theme">☾ Theme</button>
         <button class="btn" id="btn-export-svg">↓ SVG</button>
         <button class="btn" id="btn-export-png">↓ PNG</button>
         <button class="btn" id="btn-export-json">↓ JSON</button>
@@ -680,8 +705,9 @@ const GRAPH_DATA = ${data_json};
 const CHARMS = GRAPH_DATA.charms || [GRAPH_DATA.charm];
 
 // Charms share a uniform accent colour; relations are coloured by role.
-const CHARM_COLOR = "#4cc9f0";
-const ROLE_COLORS = { requires: "#f72585", provides: "#06d6a0", peers: "#ffd166" };
+// These are read from CSS variables so they update on theme toggle.
+let CHARM_COLOR = "#4cc9f0";
+let ROLE_COLORS = { requires: "#f72585", provides: "#06d6a0", peers: "#ffd166" };
 
 const svg = d3.select("svg.graph");
 const W = () => svg.node().clientWidth;
@@ -917,6 +943,7 @@ d3.select("#btn-help").on("click", () => {
     '<li><b>Integrations</b>: gold links connect relations across charms that share a Juju interface (requires&lt;-&gt;provides). The interface name is shown on each integration edge.</li>'+
     '<li><b>Issues</b>: the "Issues" panel lists detected integration problems (orphan endpoints, duplicate providers, limit over-subscription). Click a warning to highlight the affected nodes; click the background to clear.</li>'+
     '<li><b>Export</b>: use the ↓ SVG / ↓ PNG / ↓ JSON buttons to download the current graph (respecting charm visibility and hide-unconnected) as a self-contained SVG, PNG, or JSON file.</li>'+
+    '<li><b>Theme</b>: click the ☾/☀ button to toggle between dark and light themes. Your preference is saved.</li>'+
     '</ul>'
   );
 });
@@ -1028,6 +1055,65 @@ function hoverRestore() {
   applySearchFilter();
 }
 
+// ---- Theme toggle ----
+function readThemeColors() {
+  const cs = getComputedStyle(document.documentElement);
+  return {
+    charm: cs.getPropertyValue("--accent").trim(),
+    nodeFill: cs.getPropertyValue("--node-fill").trim(),
+    linkRel: cs.getPropertyValue("--link-relation").trim(),
+    integration: cs.getPropertyValue("--integration").trim(),
+    roles: {
+      requires: cs.getPropertyValue("--requires").trim(),
+      provides: cs.getPropertyValue("--provides").trim(),
+      peers: cs.getPropertyValue("--peers").trim(),
+    },
+  };
+}
+
+function recolor() {
+  const tc = readThemeColors();
+  CHARM_COLOR = tc.charm;
+  ROLE_COLORS = tc.roles;
+  function nodeColor(d) {
+    if (d.type === "charm") return CHARM_COLOR;
+    if (d.type === "relation") return ROLE_COLORS[d.role] || "#888";
+    return "#888";
+  }
+  d3.select("#arrow-integration path").attr("fill", tc.integration);
+  d3.select("#arrow-relation path").attr("fill", tc.linkRel);
+  node.selectAll("circle").each(function(d) {
+    const sel = d3.select(this);
+    if (sel.attr("fill") === "none") {
+      sel.attr("stroke", CHARM_COLOR);
+    } else if (d.type === "charm") {
+      sel.attr("fill", tc.nodeFill).attr("stroke", CHARM_COLOR);
+    } else {
+      const c = nodeColor(d);
+      sel.attr("fill", c).attr("stroke", d3.color(c).darker(0.6));
+    }
+  });
+}
+
+function toggleTheme() {
+  const isLight = document.documentElement.getAttribute("data-theme") === "light";
+  document.documentElement.setAttribute("data-theme", isLight ? "dark" : "light");
+  d3.select("#btn-theme").text(isLight ? "☾ Theme" : "☀ Theme");
+  try { localStorage.setItem("cv-theme", isLight ? "dark" : "light"); } catch(e) {}
+  recolor();
+}
+
+(function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem("cv-theme"); } catch(e) {}
+  if (saved === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+    d3.select("#btn-theme").text("☀ Theme");
+  }
+})();
+
+d3.select("#btn-theme").on("click", toggleTheme);
+
 
 // ---- Title card ----
 const integrationCount = links.filter(l => l.kind === "integration").length;
@@ -1133,7 +1219,11 @@ window.addEventListener("resize", () => {
 });
 
 // ---- In-browser export (SVG / PNG / JSON) ----
-const EXPORT_BG = "#0d1b2a";
+const EXPORT_BG_DARK = "#0d1b2a";
+const EXPORT_BG_LIGHT = "#f0f4f8";
+function getExportBg() {
+  return document.documentElement.getAttribute("data-theme") === "light" ? EXPORT_BG_LIGHT : EXPORT_BG_DARK;
+}
 
 function exportFilename(ext) {
   let t = document.title || "charm-graph";
@@ -1191,7 +1281,7 @@ function buildExportSVG() {
   const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
   bg.setAttribute("x", vbX); bg.setAttribute("y", vbY);
   bg.setAttribute("width", vbW); bg.setAttribute("height", vbH);
-  bg.setAttribute("fill", EXPORT_BG);
+  bg.setAttribute("fill", getExportBg());
   clone.insertBefore(bg, clone.firstChild);
   // Inline computed styles onto the clone.
   inlineSvgStyles(svgEl, clone);
@@ -1216,7 +1306,7 @@ function exportPNG() {
     canvas.width = Math.round(vb[2] * scale);
     canvas.height = Math.round(vb[3] * scale);
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = EXPORT_BG;
+    ctx.fillStyle = getExportBg();
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(svgUrl);
@@ -1465,9 +1555,6 @@ def _compute_static_positions(graph: dict) -> dict[str, tuple[float, float]]:
     for n in graph["nodes"]:
         nodes_by_charm.setdefault(n.get("charm_index", 0), []).append(n)
 
-    import math
-
-    canvas_w = 0.0
     for idx, group in nodes_by_charm.items():
         charm_node = next((n for n in group if n["type"] == "charm"), None)
         if charm_node is None:
@@ -1482,7 +1569,6 @@ def _compute_static_positions(graph: dict) -> dict[str, tuple[float, float]]:
         for i, n in enumerate(rels):
             angle = 2 * math.pi * i / count - math.pi / 2
             pos[n["id"]] = (cx + radius * math.cos(angle), cy + radius * math.sin(angle))
-        canvas_w = max(canvas_w, cx + radius + 200)
 
     # Fallback for any node without a position (defensive).
     for n in graph["nodes"]:
