@@ -1616,6 +1616,7 @@ def main(argv: list[str] | None = None) -> int:
             """
         ),
     )
+    p.add_argument("--version", action="version", version=f"charm-visualizer {__version__}")
     p.add_argument("charm_dir", nargs="?", help="Path to a charm directory (one with metadata.yaml or charmcraft.yaml).")
     p.add_argument("--all", dest="all_dir", metavar="DIR", help="Scan DIR for charm directories and render all of them in one graph.")
     p.add_argument("-o", "--output", default=None, help="Output file (default: charm-graph.<ext> matching --format).")

@@ -676,6 +676,15 @@ class LintTests(unittest.TestCase):
             rc = visualizer.main(["--all", tmpdir, "--lint", "--strict"])
             self.assertEqual(rc, 0)
 
+    def test_cli_version_flag_prints_version(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.suppress(SystemExit) as cm:
+            with contextlib.redirect_stdout(buf):
+                visualizer.main(["--version"])
+        output = buf.getvalue().strip()
+        self.assertIn(visualizer.__version__, output)
+
 
 if __name__ == "__main__":
     unittest.main()
