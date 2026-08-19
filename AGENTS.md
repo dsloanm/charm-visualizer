@@ -62,8 +62,8 @@ constants live near the top of the "Other output formats" section.
 
 ## Generated artifacts
 
-`charm-graph.*` and `sample-output-*.html` are generated outputs. Do
-not commit them. (They are not yet in `.gitignore` — a welcome fix.)
+`charm-graph.*` and `sample-output-*.html` are generated outputs and are
+in `.gitignore`. Do not commit them.
 
 ## Sign-off
 

@@ -11,3 +11,7 @@ venv/
 .ruff_cache/
 .mypy_cache/
 *.db
+
+# Generated graph outputs
+charm-graph.*
+sample-output-*.html
