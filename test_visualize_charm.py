@@ -122,19 +122,22 @@ class CombinedGraphTests(unittest.TestCase):
 
     def test_rendered_html_contains_in_graph_search_and_hover(self):
         """The search box must also highlight/dim canvas nodes, and hover
-        must highlight a node's connected neighbours/edges."""
+        from the charm list must highlight a node's connected neighbours/edges."""
         rendered = visualizer._render_html(self.graph, "Sample charms")
         # Search-driven canvas highlight
         self.assertIn("applySearchFilter", rendered)
         self.assertIn("nodeMatchesSearch", rendered)
         self.assertIn("resetOpacity", rendered)
-        # Hover highlight
+        # Hover highlight (from charm list only, not canvas nodes)
         self.assertIn("hoverHighlight", rendered)
         self.assertIn("hoverRestore", rendered)
         self.assertIn("mouseenter", rendered)
         self.assertIn("mouseleave", rendered)
         # Neighbour map for hover
         self.assertIn("neighbours", rendered)
+        # Canvas nodes must NOT have mouseenter/mouseleave bound to them
+        self.assertNotIn('node.on("mouseenter"', rendered)
+        self.assertNotIn('node.on("mouseleave"', rendered)
 
     def test_export_svg_xml_declaration_is_single_line(self):
         """Regression: the inline JS must not contain a literal newline inside

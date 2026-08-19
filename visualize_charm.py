@@ -568,8 +568,9 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
   .issue-badge {
     display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
     border-radius: 8px; background: #4a2a3a; color: #f72585; margin-left: 6px;
-    vertical-align: middle;
+    vertical-align: middle; cursor: pointer; transition: background .15s;
   }
+  .issue-badge:hover { background: #5a3a4a; }
 
   /* Side panel */
   #panel {
@@ -921,7 +922,12 @@ toggleList.selectAll("label").data(CHARMS).join("label")
       .attr("type","checkbox").property("checked", true)
       .on("change", function() { toggleCharm(i, this.checked); });
     row.append("span").attr("class","tname").text(c.name);
-  });
+  })
+  .on("mouseenter", function(event, d) {
+    const charmNode = nodes.find(n => n.type === "charm" && n.charm_index === CHARMS.indexOf(d));
+    if (charmNode) hoverHighlight(charmNode);
+  })
+  .on("mouseleave", () => hoverRestore());
 
 function toggleCharm(i, on) {
   charmVisible.set(i, on);
@@ -1002,8 +1008,6 @@ function hoverRestore() {
   applySearchFilter();
 }
 
-node.on("mouseenter", (event, d) => hoverHighlight(d))
-    .on("mouseleave", () => hoverRestore());
 
 // ---- Title card ----
 const integrationCount = links.filter(l => l.kind === "integration").length;
@@ -1060,7 +1064,8 @@ function highlightLintWarning(w) {
 }
 
 if (LINT_WARNINGS.length > 0) {
-  issuesCard.style("display", null);
+  // Populate the issues list but keep the panel hidden by default;
+  // the title-card badge toggles visibility.
   issuesList.selectAll("div")
     .data(LINT_WARNINGS)
     .join("div")
@@ -1074,7 +1079,12 @@ if (LINT_WARNINGS.length > 0) {
     .on("click", function(event, w) { event.stopPropagation(); highlightLintWarning(w); });
   d3.select("#tc-title").append("span")
     .attr("class", "issue-badge")
-    .text(LINT_WARNINGS.length + " issue(s)");
+    .text(LINT_WARNINGS.length + " issue(s)")
+    .on("click", function(event) {
+      event.stopPropagation();
+      const visible = issuesCard.style("display") !== "none";
+      issuesCard.style("display", visible ? "none" : null);
+    });
 } else {
   issuesCard.remove();
 }
