@@ -610,6 +610,7 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
   .link.relation { stroke: #3a5a7a; stroke-width: 2; }
   .link.relation.container { stroke-dasharray: 5 4; }
   .link.integration { stroke: #ffd166; stroke-width: 3; stroke-opacity: 0.7; }
+  .link-label { fill: #ffd166; font-size: 10px; text-anchor: middle; pointer-events: none; user-select: none; paint-order: stroke; stroke: var(--bg); stroke-width: 3; }
   .subordinate-ring { fill: none; stroke-dasharray: 4 3; }
 
   /* zoom hint */
@@ -733,6 +734,11 @@ const link = g.append("g").attr("class","links").attr("stroke-opacity",0.5)
   .attr("class", d => "link " + d.kind + (d.kind === "relation" && d.scope === "container" ? " container" : ""))
   .attr("marker-end", d => "url(#arrow-" + d.kind + ")");
 
+const linkLabel = g.append("g").attr("class","link-labels")
+  .selectAll("text").data(links.filter(l => l.kind === "integration")).join("text")
+  .attr("class","link-label")
+  .text(d => d.interface || "");
+
 const node = g.append("g").attr("class","nodes").selectAll("g").data(nodes).join("g")
   .attr("class","node").call(d3.drag()
     .on("start", (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
@@ -780,6 +786,8 @@ sim.on("tick", () => {
     return "M" + sx + "," + sy + "A" + dr + "," + dr + " 0 0,1 " + tx + "," + ty;
   });
   node.attr("transform", d => "translate(" + d.x + "," + d.y + ")");
+  linkLabel.attr("x", d => (d.source.x + d.target.x) / 2)
+           .attr("y", d => (d.source.y + d.target.y) / 2);
 });
 
 // ---- Visibility ----
@@ -817,6 +825,7 @@ function linkVisible(l) { return nodeVisible(l.source) && nodeVisible(l.target);
 function updateVisibility() {
   node.attr("display", d => nodeVisible(d) ? null : "none");
   link.attr("display", l => linkVisible(l) ? null : "none");
+  linkLabel.attr("display", l => linkVisible(l) ? null : "none");
 }
 updateVisibility();
 
@@ -905,7 +914,7 @@ d3.select("#btn-help").on("click", () => {
     '<li><b>Hide unconnected</b>: hides requires/provides relations that aren&#39;t part of an integration with another visible charm. Click again to show them.</li>'+
     '<li><b>Colours</b>: charm nodes share a uniform blue ring; relation nodes are coloured by role — pink=requires, green=provides, gold=peers.</li>'+
     '<li><b>Subordinate charms</b>: drawn with a dashed ring and a "subordinate" sub-label; their container-scope relations use a dashed edge.</li>'+
-    '<li><b>Integrations</b>: gold links connect relations across charms that share a Juju interface (requires&lt;-&gt;provides).</li>'+
+    '<li><b>Integrations</b>: gold links connect relations across charms that share a Juju interface (requires&lt;-&gt;provides). The interface name is shown on each integration edge.</li>'+
     '<li><b>Issues</b>: the "Issues" panel lists detected integration problems (orphan endpoints, duplicate providers, limit over-subscription). Click a warning to highlight the affected nodes; click the background to clear.</li>'+
     '<li><b>Export</b>: use the ↓ SVG / ↓ PNG / ↓ JSON buttons to download the current graph (respecting charm visibility and hide-unconnected) as a self-contained SVG, PNG, or JSON file.</li>'+
     '</ul>'
@@ -966,6 +975,7 @@ function defaultLinkOpacity(l) {
 function resetOpacity() {
   node.transition().duration(150).style("opacity", 1);
   link.transition().duration(150).style("opacity", defaultLinkOpacity);
+  linkLabel.transition().duration(150).style("opacity", 0.9);
 }
 
 function applySearchFilter() {
@@ -977,6 +987,11 @@ function applySearchFilter() {
     const sm = typeof l.source === "object" ? l.source : nodeById.get(l.source);
     const tm = typeof l.target === "object" ? l.target : nodeById.get(l.target);
     return (nodeMatchesSearch(sm, q) || nodeMatchesSearch(tm, q)) ? 0.6 : 0.03;
+  });
+  linkLabel.transition().duration(150).style("opacity", function(l) {
+    const sm = typeof l.source === "object" ? l.source : nodeById.get(l.source);
+    const tm = typeof l.target === "object" ? l.target : nodeById.get(l.target);
+    return (nodeMatchesSearch(sm, q) || nodeMatchesSearch(tm, q)) ? 0.9 : 0.03;
   });
 }
 
@@ -1000,6 +1015,11 @@ function hoverHighlight(d) {
     const sid = typeof l.source === "object" ? l.source.id : l.source;
     const tid = typeof l.target === "object" ? l.target.id : l.target;
     return (nSet.has(sid) && nSet.has(tid)) ? 0.8 : 0.03;
+  });
+  linkLabel.transition().duration(100).style("opacity", function(l) {
+    const sid = typeof l.source === "object" ? l.source.id : l.source;
+    const tid = typeof l.target === "object" ? l.target.id : l.target;
+    return (nSet.has(sid) && nSet.has(tid)) ? 0.9 : 0.03;
   });
 }
 
@@ -1059,6 +1079,11 @@ function highlightLintWarning(w) {
     const sid = typeof l.source === "object" ? l.source.id : l.source;
     const tid = typeof l.target === "object" ? l.target.id : l.target;
     return (targetIds.has(sid) || targetIds.has(tid)) ? 0.8 : 0.05;
+  });
+  linkLabel.transition().duration(200).style("opacity", l => {
+    const sid = typeof l.source === "object" ? l.source.id : l.source;
+    const tid = typeof l.target === "object" ? l.target.id : l.target;
+    return (targetIds.has(sid) || targetIds.has(tid)) ? 0.9 : 0.05;
   });
   issuesList.selectAll(".issue-row").classed("active", d => d === w);
 }

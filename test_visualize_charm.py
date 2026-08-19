@@ -139,6 +139,13 @@ class CombinedGraphTests(unittest.TestCase):
         self.assertNotIn('node.on("mouseenter"', rendered)
         self.assertNotIn('node.on("mouseleave"', rendered)
 
+    def test_rendered_html_contains_integration_edge_labels(self):
+        """Integration links must show the interface name as a label on the canvas."""
+        rendered = visualizer._render_html(self.graph, "Sample charms")
+        self.assertIn("link-label", rendered)
+        self.assertIn("linkLabel", rendered)
+        self.assertIn("link-labels", rendered)
+
     def test_export_svg_xml_declaration_is_single_line(self):
         """Regression: the inline JS must not contain a literal newline inside
         the single-quoted <?xml ...?> string in exportSVG(), otherwise the
