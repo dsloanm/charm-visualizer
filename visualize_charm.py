@@ -584,6 +584,15 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
     --bg-gradient: #1a3350;
     --link-relation: #3a5a7a;
     --node-fill: #0d1b2a;
+    --panel-bg: rgba(20,36,54,0.85);
+    --panel-hover: #233a5a;
+    --panel-active: rgba(35,58,90,0.8);
+    --input-bg: rgba(13,27,42,0.6);
+    --shadow: rgba(0,0,0,0.35);
+    --issue-orphan-bg: #4a2a3a;
+    --issue-dup-bg: #3a3a1a;
+    --issue-limit-bg: #3a2a1a;
+    --badge-bg: #233a5a;
   }
   [data-theme="light"] {
     --bg: #f0f4f8;
@@ -600,6 +609,15 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
     --bg-gradient: #dbeafe;
     --link-relation: #94a3b8;
     --node-fill: #f8fafc;
+    --panel-bg: rgba(255,255,255,0.88);
+    --panel-hover: #e8edf3;
+    --panel-active: #d1dce8;
+    --input-bg: rgba(241,245,249,0.6);
+    --shadow: rgba(0,0,0,0.12);
+    --issue-orphan-bg: #fce7ec;
+    --issue-dup-bg: #fef3c7;
+    --issue-limit-bg: #fed7aa;
+    --badge-bg: #e0e7ef;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; padding: 0; }
@@ -623,9 +641,9 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
     max-width: 240px;
   }
   .title-card {
-    background: rgba(20,36,54,0.85); backdrop-filter: blur(8px);
+    background: var(--panel-bg); backdrop-filter: blur(8px);
     border: 1px solid var(--panel-border); border-radius: 10px;
-    padding: 10px 14px; box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+    padding: 10px 14px; box-shadow: 0 6px 24px var(--shadow);
     pointer-events: auto; max-width: 320px;
   }
   .title-card h1 { margin: 0 0 4px 0; font-size: 16px; color: var(--accent); }
@@ -634,19 +652,19 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
     display: flex; gap: 4px; pointer-events: auto; flex-wrap: wrap;
   }
   .btn {
-    background: rgba(20,36,54,0.85); border: 1px solid var(--panel-border);
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
     color: var(--text); border-radius: 6px; padding: 4px 8px;
     font-size: 11px; cursor: pointer; backdrop-filter: blur(8px);
     transition: background .15s, transform .1s; white-space: nowrap;
   }
-  .btn:hover { background: #233a5a; }
+  .btn:hover { background: var(--panel-hover); }
   .btn:active { transform: scale(0.96); }
 
   .card {
-    background: rgba(20,36,54,0.85); backdrop-filter: blur(8px);
+    background: var(--panel-bg); backdrop-filter: blur(8px);
     border: 1px solid var(--panel-border); border-radius: 10px;
     padding: 10px 12px; font-size: 12px; pointer-events: auto;
-    box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+    box-shadow: 0 6px 24px var(--shadow);
   }
   .card h2 {
     margin: 0 0 6px 0; font-size: 12px; color: var(--text-dim);
@@ -659,7 +677,7 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
   .charm-toggles { max-height: 40vh; overflow-y: auto; min-width: 180px; }
   .charm-search {
     width: 100%; box-sizing: border-box; margin-bottom: 6px;
-    background: rgba(13,27,42,0.6); border: 1px solid var(--panel-border);
+    background: var(--input-bg); border: 1px solid var(--panel-border);
     border-radius: 6px; padding: 5px 8px; color: var(--text);
     font-size: 12px; font-family: inherit;
   }
@@ -683,38 +701,38 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
   .issues-card:empty { display: none; }
   .issue-row {
     cursor: pointer; padding: 4px 6px; margin: 3px 0; border-radius: 5px;
-    background: rgba(13,27,42,0.5); border: 1px solid transparent;
+    background: var(--input-bg); border: 1px solid transparent;
     font-size: 11px; line-height: 1.4; transition: background .15s, border-color .15s;
   }
-  .issue-row:hover { background: rgba(35,58,90,0.7); border-color: var(--panel-border); }
-  .issue-row.active { border-color: var(--accent); background: rgba(35,58,90,0.8); }
+  .issue-row:hover { background: var(--panel-hover); border-color: var(--panel-border); }
+  .issue-row.active { border-color: var(--accent); background: var(--panel-active); }
   .issue-kind {
     display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px;
     border-radius: 3px; margin-right: 4px; text-transform: uppercase;
     letter-spacing: .5px; vertical-align: middle;
   }
-  .issue-kind.orphan { background: #4a2a3a; color: #f72585; }
-  .issue-kind.duplicate-provider { background: #3a3a1a; color: #ffd166; }
-  .issue-kind.limit-exceeded { background: #3a2a1a; color: #ff9e3d; }
+  .issue-kind.orphan { background: var(--issue-orphan-bg); color: var(--requires); }
+  .issue-kind.duplicate-provider { background: var(--issue-dup-bg); color: var(--peers); }
+  .issue-kind.limit-exceeded { background: var(--issue-limit-bg); color: #ff9e3d; }
   .issue-badge {
     display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
-    border-radius: 8px; background: #4a2a3a; color: #f72585; margin-left: 6px;
+    border-radius: 8px; background: var(--issue-orphan-bg); color: var(--requires); margin-left: 6px;
     vertical-align: middle; cursor: pointer; transition: background .15s;
   }
-  .issue-badge:hover { background: #5a3a4a; }
+  .issue-badge:hover { background: var(--panel-hover); }
 
   /* Side panel */
   #panel {
     width: 380px; min-width: 320px; max-width: 460px;
     background: var(--panel); border-left: 1px solid var(--panel-border);
-    overflow-y: auto; padding: 18px 20px; box-shadow: -8px 0 30px rgba(0,0,0,0.4);
+    overflow-y: auto; padding: 18px 20px; box-shadow: -8px 0 30px var(--shadow);
     transition: transform .25s ease;
   }
   #panel.collapsed { transform: translateX(110%); position: absolute; right: 0; top: 0; height: 100%; }
   #panel h2 { margin: 0 0 4px 0; font-size: 20px; color: var(--accent); }
   #panel .badge {
     display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px;
-    background: #233a5a; color: var(--text-dim); margin-bottom: 12px; text-transform: uppercase; letter-spacing: .5px;
+    background: var(--badge-bg); color: var(--text-dim); margin-bottom: 12px; text-transform: uppercase; letter-spacing: .5px;
   }
   #panel h3 { margin: 18px 0 6px 0; font-size: 13px; color: var(--text-dim);
     text-transform: uppercase; letter-spacing: .7px; border-bottom: 1px solid var(--panel-border); padding-bottom: 4px; }
@@ -724,7 +742,7 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
   #panel .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
   #panel .kv { display: flex; gap: 8px; font-size: 12px; color: var(--text-dim); margin: 2px 0;}
   #panel .kv b { color: var(--text); font-weight: 600; min-width: 70px; }
-  #panel .stat { display: inline-block; background: #233a5a; border-radius: 8px; padding: 4px 10px; margin: 2px 4px 2px 0; font-size: 12px; }
+  #panel .stat { display: inline-block; background: var(--badge-bg); border-radius: 8px; padding: 4px 10px; margin: 2px 4px 2px 0; font-size: 12px; }
   #panel .stat b { color: var(--accent); }
   #panel .close {
     position: sticky; top: 0; float: right; cursor: pointer; color: var(--text-dim);
@@ -747,13 +765,13 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
   /* zoom hint */
   .hint {
     position: absolute; bottom: 12px; left: 12px; z-index: 10;
-    background: rgba(20,36,54,0.7); border: 1px solid var(--panel-border);
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
     border-radius: 8px; padding: 6px 10px; font-size: 11px; color: var(--text-dim);
     backdrop-filter: blur(6px);
   }
   .zoom-indicator {
     position: absolute; top: 12px; right: 12px; z-index: 10;
-    background: rgba(20,36,54,0.85); border: 1px solid var(--panel-border);
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
     border-radius: 8px; padding: 4px 10px; font-size: 11px; color: var(--accent);
     backdrop-filter: blur(6px);
   }
@@ -796,7 +814,7 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
         <div class="row"><span class="sw" style="background:var(--requires)"></span> requires (incoming)</div>
         <div class="row"><span class="sw" style="background:var(--provides)"></span> provides (outgoing)</div>
         <div class="row"><span class="sw" style="background:var(--peers)"></span> peers</div>
-        <div class="row"><span class="sw" style="background:transparent; border-bottom: 2px dashed #3a5a7a; width: 16px; height: 0;"></span> container-scope relation</div>
+        <div class="row"><span class="sw" style="background:transparent; border-bottom: 2px dashed var(--link-relation); width: 16px; height: 0;"></span> container-scope relation</div>
         <div class="row"><span class="sw" style="background:var(--integration)"></span> charm integration</div>
       </div>
     </div>
@@ -828,7 +846,7 @@ const merge = f.append("feMerge"); merge.append("feMergeNode").attr("in","blur")
 
 ["relation","integration"].forEach(kind => {
   const m = defs.append("marker").attr("id","arrow-"+kind).attr("viewBox","0 -5 10 10").attr("refX",18).attr("refY",0).attr("markerWidth",7).attr("markerHeight",7).attr("orient","auto");
-  m.append("path").attr("d","M0,-5L10,0L0,5").attr("fill", kind==="integration"?"#ffd166":"#3a5a7a");
+  m.append("path").attr("d","M0,-5L10,0L0,5").attr("fill", kind==="integration" ? "var(--integration)" : "var(--link-relation)");
 });
 
 const g = svg.append("g").attr("class","zoom-layer");
@@ -889,7 +907,7 @@ node.filter(d => d.type === "charm").append("circle")
 // main circle: charms are hollow (dark fill, coloured ring); relations are solid
 node.append("circle")
   .attr("r", radius)
-  .attr("fill", d => d.type === "charm" ? "#0d1b2a" : color(d))
+  .attr("fill", d => d.type === "charm" ? "var(--node-fill)" : color(d))
   .attr("stroke", d => d.type === "charm" ? CHARM_COLOR : d3.color(color(d)).darker(0.6))
   .attr("stroke-width", d => d.type === "charm" ? (d.subordinate ? 1.5 : 2.5) : 1.5)
   .attr("stroke-dasharray", d => d.type === "charm" && d.subordinate ? "4 3" : null)
