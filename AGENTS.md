@@ -90,6 +90,7 @@ Consider adding the following to this file as the project evolves:
   dependency is acceptable.
 - **Browser testing** — if Playwright or similar is added for testing
   the interactive HTML view, document how to run those tests.
-- **Bundle.yaml / Charmhub features** — once bundle support or
-  Charmhub fetch mode is implemented, document the flag and data
-  sources here.
+- **Bundle.yaml / Charmhub features** — `--charmhub NAME` fetches charm
+  metadata from Charmhub by name (no local clone needed). Results cached
+  to `~/.cache/charm-visualizer/`; use `--no-cache` to bypass. Bundle.yaml
+  parsing is not yet implemented.

@@ -31,10 +31,7 @@ Usage::
 
     python3 visualize_charm.py <charm_dir> [-o output.html]
     python3 visualize_charm.py --all <dir_with_charms> [-o output.html]
-    python3 visualize_charm.py <charm_dir> --format dot -o graph.dot
-    python3 visualize_charm.py <charm_dir> --format mermaid -o graph.mmd
-    python3 visualize_charm.py <charm_dir> --format svg -o graph.svg
-    python3 visualize_charm.py <charm_dir> --format json -o graph.json
+    python3 visualize_charm.py --charmhub slurmctld [--charmhub slurmd ...]
 
 Run ``python3 visualize_charm.py --help`` for full options.
 """
@@ -47,7 +44,10 @@ import json
 import math
 import os
 import sys
+import tempfile
 import textwrap
+import urllib.error
+import urllib.request
 from pathlib import Path
 from string import Template
 
@@ -182,6 +182,112 @@ def is_charm_dir(path: Path) -> bool:
         return True
     except CharmInspectionError:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Charmhub fetch
+# ---------------------------------------------------------------------------
+
+CHARMHUB_API = "https://api.snapcraft.io/v2/charms/info"
+CHARMHUB_HEADERS = {
+    "Accept": "application/json",
+    "Snap-Device-Series": "16",
+}
+CACHE_DIR = Path.home() / ".cache" / "charm-visualizer"
+
+
+class CharmhubFetchError(Exception):
+    """Raised when a charm cannot be fetched from Charmhub."""
+
+
+def _cache_path(name: str, channel: str | None) -> Path:
+    safe = name.replace("/", "_")
+    suffix = f"_{channel.replace('/', '_')}" if channel else ""
+    return CACHE_DIR / f"{safe}{suffix}.yaml"
+
+
+def _charmhub_api_url(name: str, channel: str | None) -> str:
+    url = f"{CHARMHUB_API}/{name}"
+    params = {"fields": "default-release"}
+    if channel:
+        params["channel"] = channel
+    from urllib.parse import urlencode
+    return f"{url}?{urlencode(params)}"
+
+
+def _fetch_charmhub_raw(name: str, channel: str | None = None) -> str:
+    """Fetch charm metadata YAML from Charmhub. Returns the metadata-yaml string."""
+    url = _charmhub_api_url(name, channel)
+    req = urllib.request.Request(url, headers=CHARMHUB_HEADERS)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise CharmhubFetchError(
+                f"Charm '{name}' not found on Charmhub"
+            ) from exc
+        raise CharmhubFetchError(
+            f"Charmhub API error for '{name}': HTTP {exc.code} {exc.reason}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise CharmhubFetchError(
+            f"Network error fetching '{name}' from Charmhub: {exc.reason}"
+        ) from exc
+
+    dr = data.get("default-release")
+    if not dr:
+        raise CharmhubFetchError(
+            f"No default release found for charm '{name}' on Charmhub"
+        )
+    revision = dr.get("revision", {})
+    meta_yaml = revision.get("metadata-yaml")
+    if not meta_yaml:
+        raise CharmhubFetchError(
+            f"No metadata.yaml in Charmhub response for '{name}'"
+        )
+    return meta_yaml
+
+
+def fetch_charmhub_charm(name: str, channel: str | None = None) -> CharmModel:
+    """Fetch a charm's metadata from Charmhub and return a CharmModel.
+
+    Results are cached to ``~/.cache/charm-visualizer/`` to avoid
+    repeated network requests. The cache has no TTL; pass a different
+    channel or delete the cache file to refresh.
+    """
+    cache = _cache_path(name, channel)
+    if cache.is_file():
+        metadata_yaml = cache.read_text(encoding="utf-8")
+    else:
+        metadata_yaml = _fetch_charmhub_raw(name, channel)
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache.write_text(metadata_yaml, encoding="utf-8")
+        except OSError:
+            pass
+
+    metadata = yaml.safe_load(metadata_yaml) or {}
+    if not isinstance(metadata, dict):
+        raise CharmhubFetchError(
+            f"Invalid metadata from Charmhub for '{name}': not a dict"
+        )
+
+    charm_name = metadata.get("name") or name
+    summary = (metadata.get("summary") or "").strip()
+    description = (metadata.get("description") or "").strip()
+    subordinate = bool(metadata.get("subordinate", False))
+    relations = _build_relations(metadata)
+
+    return CharmModel(
+        name=charm_name,
+        summary=summary,
+        description=description,
+        subordinate=subordinate,
+        meta_path=f"charmhub:{name}" + (f"/{channel}" if channel else ""),
+        relations=relations,
+        stats={"relations": len(relations), "subordinate": subordinate},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1724,12 +1830,15 @@ def main(argv: list[str] | None = None) -> int:
               python3 visualize_charm.py ./sample-charms -o all.html
               python3 visualize_charm.py --all ./sample-charms
               python3 visualize_charm.py --all ./sample-charms --lint --strict
+              python3 visualize_charm.py --charmhub slurmctld --charmhub slurmd
             """
         ),
     )
     p.add_argument("--version", action="version", version=f"charm-visualizer {__version__}")
     p.add_argument("charm_dir", nargs="?", help="Path to a charm directory (one with metadata.yaml or charmcraft.yaml).")
     p.add_argument("--all", dest="all_dir", metavar="DIR", help="Scan DIR for charm directories and render all of them in one graph.")
+    p.add_argument("--charmhub", action="append", metavar="NAME", help="Fetch charm metadata from Charmhub by name. Can be repeated for multiple charms. Use NAME or NAME/CHANNEL.")
+    p.add_argument("--no-cache", action="store_true", help="With --charmhub, bypass the local cache and always fetch from the network.")
     p.add_argument("-o", "--output", default=None, help="Output file (default: charm-graph.<ext> matching --format).")
     p.add_argument("--title", default=None, help="Title for the output (default: charm name).")
     p.add_argument("--print-model", action="store_true", help="Print the inspected charm model as JSON and exit (no output file).")
@@ -1745,7 +1854,20 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     models: list[CharmModel] = []
-    if args.all_dir:
+    if args.charmhub:
+        for spec in args.charmhub:
+            parts = spec.split("/", 1)
+            cname = parts[0]
+            channel = parts[1] if len(parts) > 1 else None
+            if args.no_cache:
+                cache = _cache_path(cname, channel)
+                if cache.is_file():
+                    cache.unlink()
+            try:
+                models.append(fetch_charmhub_charm(cname, channel))
+            except CharmhubFetchError as exc:
+                sys.stderr.write(f"warning: skipping charmhub:{spec}: {exc}\n")
+    elif args.all_dir:
         root = Path(args.all_dir)
         if not root.is_dir():
             p.error(f"--all: not a directory: {root}")
@@ -1759,7 +1881,7 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write(f"warning: skipping {cd}: {exc}\n")
     else:
         if not args.charm_dir:
-            p.error("a charm_dir is required (or use --all DIR).")
+            p.error("a charm_dir is required (or use --all DIR or --charmhub NAME).")
         cd = Path(args.charm_dir)
         try:
             models.append(inspect_charm(cd))

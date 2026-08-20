@@ -21,6 +21,7 @@ Given the path to a charm directory (one containing a `metadata.yaml` or `charmc
 - **In-browser export** — download the current graph (respecting charm visibility and hide-unconnected state) as SVG, PNG, or JSON directly from the HTML view via the ↓ buttons.
 - **Charm search/filter** — a search box in the charm toggle list filters charms by name, useful for graphs with many charms.
 - **Lint mode** — `--lint` checks for integration issues: orphan endpoints (requires/provides with no matching counterpart), duplicate-interface providers (a charm providing the same interface on multiple endpoints), and `limit` over-subscription. Use `--strict` to exit non-zero, suitable for CI. Warnings are also surfaced as an interactive "Issues" panel in the HTML view with click-to-highlight.
+- **Charmhub fetch** — `--charmhub <name>` fetches charm metadata directly from Charmhub by name, without needing a local clone. Can be repeated for multiple charms. Results are cached locally; use `--no-cache` to force a fresh fetch.
 
 ## Requirements
 
@@ -46,6 +47,10 @@ python3 visualize_charm.py --all path/to/charms-dir --lint
 
 # Same, but exit non-zero if any warnings are found (for CI)
 python3 visualize_charm.py --all path/to/charms-dir --lint --strict
+
+# Fetch and visualize charms from Charmhub by name
+python3 visualize_charm.py --charmhub slurmctld --charmhub slurmd -o slurm.html
+python3 visualize_charm.py --charmhub slurmctld/latest/edge --print-model
 
 # Export in other formats
 python3 visualize_charm.py path/to/my-charm --format dot     # → charm-graph.dot (Graphviz)

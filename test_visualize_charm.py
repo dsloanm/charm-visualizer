@@ -732,5 +732,144 @@ class LintTests(unittest.TestCase):
         self.assertIn(visualizer.__version__, output)
 
 
+class CharmhubFetchTests(unittest.TestCase):
+    """Tests for the --charmhub fetch mode (with mocked HTTP)."""
+
+    SAMPLE_METADATA_YAML = (
+        "name: test-charm\n"
+        "summary: A test charm\n"
+        "description: This is a test.\n"
+        "requires:\n"
+        "  db:\n"
+        "    interface: mysql\n"
+        "provides:\n"
+        "  web:\n"
+        "    interface: http\n"
+    )
+
+    def _mock_api_response(self, metadata_yaml=None):
+        import json as _json, io
+        metadata_yaml = metadata_yaml or self.SAMPLE_METADATA_YAML
+        payload = {
+            "default-release": {
+                "channel": {"name": "latest/stable", "risk": "stable"},
+                "revision": {"metadata-yaml": metadata_yaml, "version": "1.0"},
+            }
+        }
+        return io.BytesIO(_json.dumps(payload).encode("utf-8"))
+
+    def setUp(self):
+        import tempfile
+        self.tmpdir = tempfile.mkdtemp()
+        self._orig_cache_dir = visualizer.CACHE_DIR
+        visualizer.CACHE_DIR = Path(self.tmpdir) / "cache"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        visualizer.CACHE_DIR = self._orig_cache_dir
+
+    def test_fetch_charmhub_charm_returns_model(self):
+        from unittest.mock import patch, MagicMock
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = self._mock_api_response().read()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch.object(visualizer.urllib.request, "urlopen", return_value=mock_resp):
+            model = visualizer.fetch_charmhub_charm("test-charm")
+        self.assertEqual(model["name"], "test-charm")
+        self.assertEqual(model["summary"], "A test charm")
+        self.assertEqual(len(model["relations"]), 2)
+        self.assertIn("charmhub:test-charm", model["meta_path"])
+
+    def test_fetch_charmhub_charm_caches(self):
+        from unittest.mock import patch, MagicMock
+        call_count = 0
+        def fake_urlopen(*args, **kw):
+            nonlocal call_count
+            call_count += 1
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = self._mock_api_response().read()
+            mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            return mock_resp
+        with patch.object(visualizer.urllib.request, "urlopen", side_effect=fake_urlopen):
+            m1 = visualizer.fetch_charmhub_charm("cached-charm")
+            m2 = visualizer.fetch_charmhub_charm("cached-charm")
+        self.assertEqual(call_count, 1, "second call should hit cache, not network")
+        self.assertEqual(m1["name"], m2["name"])
+
+    def test_fetch_charmhub_charm_no_cache_flag(self):
+        from unittest.mock import patch, MagicMock
+        call_count = 0
+        def fake_urlopen(*args, **kw):
+            nonlocal call_count
+            call_count += 1
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = self._mock_api_response().read()
+            mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            return mock_resp
+        with patch.object(visualizer.urllib.request, "urlopen", side_effect=fake_urlopen):
+            visualizer.fetch_charmhub_charm("no-cache-charm")
+            # Delete cache to simulate --no-cache
+            visualizer._cache_path("no-cache-charm", None).unlink()
+            visualizer.fetch_charmhub_charm("no-cache-charm")
+        self.assertEqual(call_count, 2, "both calls should hit network when cache deleted")
+
+    def test_fetch_charmhub_charm_404_raises_error(self):
+        import urllib.error
+        from unittest.mock import patch
+        error = urllib.error.HTTPError(
+            "https://example.com", 404, "Not Found", {}, None
+        )
+        with patch.object(visualizer.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaises(visualizer.CharmhubFetchError) as ctx:
+                visualizer.fetch_charmhub_charm("nonexistent")
+        self.assertIn("not found", str(ctx.exception).lower())
+
+    def test_fetch_charmhub_charm_network_error_raises(self):
+        import urllib.error
+        from unittest.mock import patch
+        error = urllib.error.URLError("connection refused")
+        with patch.object(visualizer.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaises(visualizer.CharmhubFetchError) as ctx:
+                visualizer.fetch_charmhub_charm("unreachable")
+        self.assertIn("network error", str(ctx.exception).lower())
+
+    def test_fetch_charmhub_charm_with_channel(self):
+        from unittest.mock import patch, MagicMock
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = self._mock_api_response().read()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch.object(visualizer.urllib.request, "urlopen", return_value=mock_resp) as mock_open:
+            model = visualizer.fetch_charmhub_charm("test-charm", channel="latest/edge")
+        self.assertEqual(model["name"], "test-charm")
+        self.assertIn("latest/edge", model["meta_path"])
+        # Verify the channel was in the URL
+        called_url = mock_open.call_args[0][0].full_url
+        self.assertIn("channel", called_url)
+
+    def test_fetch_charmhub_charm_subordinate(self):
+        from unittest.mock import patch, MagicMock
+        yaml_str = (
+            "name: sub-charm\n"
+            "subordinate: true\n"
+            "requires:\n"
+            "  juju-info:\n"
+            "    interface: juju-info\n"
+            "    scope: container\n"
+        )
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = self._mock_api_response(yaml_str).read()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch.object(visualizer.urllib.request, "urlopen", return_value=mock_resp):
+            model = visualizer.fetch_charmhub_charm("sub-charm")
+        self.assertTrue(model["subordinate"])
+        self.assertTrue(model["stats"]["subordinate"])
+
+
 if __name__ == "__main__":
     unittest.main()
