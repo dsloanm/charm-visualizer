@@ -617,9 +617,10 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
   /* Legend / controls */
   .topbar {
     position: absolute; top: 12px; left: 12px; z-index: 10;
-    display: flex; flex-direction: column; gap: 8px;
+    display: flex; flex-direction: column; gap: 6px;
     pointer-events: none;
     max-height: calc(100vh - 24px);
+    max-width: 240px;
   }
   .title-card {
     background: rgba(20,36,54,0.85); backdrop-filter: blur(8px);
@@ -630,13 +631,13 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
   .title-card h1 { margin: 0 0 4px 0; font-size: 16px; color: var(--accent); }
   .title-card .sub { font-size: 12px; color: var(--text-dim); }
   .controls {
-    display: flex; gap: 6px; pointer-events: auto; flex-wrap: wrap;
+    display: flex; gap: 4px; pointer-events: auto; flex-wrap: wrap;
   }
   .btn {
     background: rgba(20,36,54,0.85); border: 1px solid var(--panel-border);
-    color: var(--text); border-radius: 8px; padding: 6px 10px;
-    font-size: 12px; cursor: pointer; backdrop-filter: blur(8px);
-    transition: background .15s, transform .1s;
+    color: var(--text); border-radius: 6px; padding: 4px 8px;
+    font-size: 11px; cursor: pointer; backdrop-filter: blur(8px);
+    transition: background .15s, transform .1s; white-space: nowrap;
   }
   .btn:hover { background: #233a5a; }
   .btn:active { transform: scale(0.96); }
@@ -768,16 +769,16 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
         <div class="sub" id="tc-sub">interactive charm graph</div>
       </div>
       <div class="controls">
-        <button class="btn" id="btn-zoom-in">＋ Zoom in</button>
-        <button class="btn" id="btn-zoom-out">－ Zoom out</button>
-        <button class="btn" id="btn-reset">⟳ Reset</button>
-        <button class="btn" id="btn-all">⊕ Show all</button>
-        <button class="btn" id="btn-hide-unconnected">◑ Show unconnected</button>
-        <button class="btn" id="btn-help">? Help</button>
-        <button class="btn" id="btn-theme">☾ Theme</button>
-        <button class="btn" id="btn-export-svg">↓ SVG</button>
-        <button class="btn" id="btn-export-png">↓ PNG</button>
-        <button class="btn" id="btn-export-json">↓ JSON</button>
+        <button class="btn" id="btn-zoom-in" title="Zoom in (+)">＋</button>
+        <button class="btn" id="btn-zoom-out" title="Zoom out (-)">－</button>
+        <button class="btn" id="btn-reset" title="Reset zoom (0)">⟳</button>
+        <button class="btn" id="btn-all" title="Show all charms">⊕ All</button>
+        <button class="btn" id="btn-hide-unconnected" title="Toggle unconnected (h)">◑ Unconnected</button>
+        <button class="btn" id="btn-theme" title="Toggle theme (t)">☾</button>
+        <button class="btn" id="btn-help" title="Help (?)">?</button>
+        <button class="btn" id="btn-export-svg" title="Export SVG">SVG</button>
+        <button class="btn" id="btn-export-png" title="Export PNG">PNG</button>
+        <button class="btn" id="btn-export-json" title="Export JSON">JSON</button>
       </div>
       <div class="card charm-toggles" id="charm-toggles">
         <h2>Charms</h2>
@@ -1027,7 +1028,7 @@ d3.select("#btn-all").on("click", () => {
 });
 d3.select("#btn-hide-unconnected").on("click", () => {
   hideUnconnected = !hideUnconnected;
-  d3.select("#btn-hide-unconnected").text(hideUnconnected ? "◑ Show unconnected" : "◐ Hide unconnected");
+  d3.select("#btn-hide-unconnected").text(hideUnconnected ? "◑ Unconnected" : "◐ Connected");
   updateVisibility();
 });
 d3.select("#btn-help").on("click", () => {
@@ -1215,7 +1216,7 @@ function recolor() {
 function toggleTheme() {
   const isLight = document.documentElement.getAttribute("data-theme") === "light";
   document.documentElement.setAttribute("data-theme", isLight ? "dark" : "light");
-  d3.select("#btn-theme").text(isLight ? "☾ Theme" : "☀ Theme");
+  d3.select("#btn-theme").text(isLight ? "☾" : "☀");
   try { localStorage.setItem("cv-theme", isLight ? "dark" : "light"); } catch(e) {}
   recolor();
 }
@@ -1225,7 +1226,7 @@ function toggleTheme() {
   try { saved = localStorage.getItem("cv-theme"); } catch(e) {}
   if (saved === "light") {
     document.documentElement.setAttribute("data-theme", "light");
-    d3.select("#btn-theme").text("☀ Theme");
+    d3.select("#btn-theme").text("☀");
   }
 })();
 
@@ -1375,7 +1376,7 @@ d3.select(window).on("keydown", function(event) {
       break;
     case "h":
       hideUnconnected = !hideUnconnected;
-      d3.select("#btn-hide-unconnected").text(hideUnconnected ? "◑ Show unconnected" : "◐ Hide unconnected");
+      d3.select("#btn-hide-unconnected").text(hideUnconnected ? "◑ Unconnected" : "◐ Connected");
       updateVisibility();
       break;
   }
