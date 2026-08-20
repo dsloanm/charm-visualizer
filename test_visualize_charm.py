@@ -288,6 +288,32 @@ class CombinedGraphTests(unittest.TestCase):
         # 1 relation each → max_rels=1, spacing = max(450, 120*3) = 450
         self.assertEqual(spacing, 450)
 
+    def test_radial_seeding_spreads_relation_nodes(self):
+        """Relation nodes should be seeded at different positions around the charm."""
+        charm = _charm(
+            "multi",
+            requires={"r1": "i1", "r2": "i2", "r3": "i3",
+                      "r4": "i4", "r5": "i5"},
+        )
+        graph = visualizer.build_combined_graph([charm])
+        charm_node = next(n for n in graph["nodes"] if n["type"] == "charm")
+        rel_nodes = [n for n in graph["nodes"] if n["type"] == "relation"]
+        self.assertEqual(len(rel_nodes), 5)
+        # Each relation node should have a different (x, y) from the charm node
+        for rn in rel_nodes:
+            self.assertNotEqual((rn["x"], rn["y"]), (charm_node["x"], charm_node["y"]),
+                                "relation node should not be seeded at charm position")
+        # All relation nodes should have distinct positions
+        positions = {(rn["x"], rn["y"]) for rn in rel_nodes}
+        self.assertEqual(len(positions), len(rel_nodes),
+                         "all relation nodes should be seeded at distinct positions")
+        # Relation nodes should be roughly 90px from the charm (radial)
+        import math
+        for rn in rel_nodes:
+            dist = math.sqrt((rn["x"] - charm_node["x"])**2 + (rn["y"] - charm_node["y"])**2)
+            self.assertAlmostEqual(dist, 90, delta=5,
+                                   msg=f"relation node should be ~90px from charm, got {dist}")
+
 
 class FormatRenderTests(unittest.TestCase):
     """Smoke tests for the non-HTML output formats."""

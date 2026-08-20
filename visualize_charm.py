@@ -376,13 +376,22 @@ def build_combined_graph(models: list[CharmModel]) -> dict:
             )
         # Offset each cluster in x so they don't overlap. Spacing scales
         # with the max relation count across charms so dense clusters get
-        # more room than sparse ones.
+        # more room than sparse ones. Seed relation nodes in a small
+        # circle around the charm to give the force simulation structure.
         max_rels = max((len(m["relations"]) for m in models), default=1)
         spacing = max(450, 120 * (max_rels + 2))
         offset = (i - (len(models) - 1) / 2) * spacing
-        for n in all_nodes[-len(g["nodes"]):]:
-            n["x"] = 400 + offset
-            n["y"] = 300
+        cx, cy = 400 + offset, 300
+        cluster_nodes = all_nodes[-len(g["nodes"]):]
+        rel_nodes = [n for n in cluster_nodes if n["type"] == "relation"]
+        for k, n in enumerate(cluster_nodes):
+            if n["type"] == "charm":
+                n["x"] = cx
+                n["y"] = cy
+            else:
+                angle = 2 * math.pi * rel_nodes.index(n) / max(1, len(rel_nodes)) - math.pi / 2
+                n["x"] = cx + 90 * math.cos(angle)
+                n["y"] = cy + 90 * math.sin(angle)
 
     # Cross-charm integrations: requires <-> provides on a shared interface.
     for i, mi in enumerate(models):
@@ -394,12 +403,17 @@ def build_combined_graph(models: list[CharmModel]) -> dict:
                     if ri["interface"] in (None, "—") or ri["interface"] != rj["interface"]:
                         continue
                     if sorted([ri["role"], rj["role"]]) == ["provides", "requires"]:
-                        a = f"c{i}:relation:{ri['role']}:{ri['endpoint']}"
-                        b = f"c{j}:relation:{rj['role']}:{rj['endpoint']}"
+                        # Arrow points from provides → requires (data flow direction).
+                        if ri["role"] == "provides":
+                            src_node = f"c{i}:relation:{ri['role']}:{ri['endpoint']}"
+                            tgt_node = f"c{j}:relation:{rj['role']}:{rj['endpoint']}"
+                        else:
+                            src_node = f"c{j}:relation:{rj['role']}:{rj['endpoint']}"
+                            tgt_node = f"c{i}:relation:{ri['role']}:{ri['endpoint']}"
                         all_links.append(
                             {
-                                "source": a,
-                                "target": b,
+                                "source": src_node,
+                                "target": tgt_node,
                                 "kind": "integration",
                                 "interface": ri["interface"],
                             }
@@ -874,11 +888,13 @@ function color(d) {
 }
 
 const sim = d3.forceSimulation(nodes)
-  .force("link", d3.forceLink(links).id(d => d.id).distance(l => l.kind === "integration" ? 240 : 150).strength(l => l.kind === "integration" ? 0.3 : 0.5))
-  .force("charge", d3.forceManyBody().strength(d => d.type === "charm" ? -900 : -400))
-  .force("collide", d3.forceCollide().radius(d => radius(d) + 14))
-  .force("x", d3.forceX(W()/2).strength(0.04))
-  .force("y", d3.forceY(H()/2).strength(0.06));
+  .force("link", d3.forceLink(links).id(d => d.id)
+    .distance(l => l.kind === "integration" ? 160 : 100)
+    .strength(l => l.kind === "integration" ? 0.6 : 0.8))
+  .force("charge", d3.forceManyBody().strength(d => d.type === "charm" ? -1200 : -500))
+  .force("collide", d3.forceCollide().radius(d => radius(d) + 16))
+  .force("x", d3.forceX(W()/2).strength(0.03))
+  .force("y", d3.forceY(H()/2).strength(0.05));
 
 const link = g.append("g").attr("class","links").attr("stroke-opacity",0.5)
   .selectAll("path").data(links).join("path")
@@ -933,7 +949,7 @@ node.filter(d => d.type === "charm").append("text")
 sim.on("tick", () => {
   link.attr("d", d => {
     const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
-    const dx = tx - sx, dy = ty - sy, dr = Math.sqrt(dx*dx+dy*dy) * 1.6;
+    const dx = tx - sx, dy = ty - sy, dr = Math.sqrt(dx*dx+dy*dy) * 1.1;
     return "M" + sx + "," + sy + "A" + dr + "," + dr + " 0 0,1 " + tx + "," + ty;
   });
   node.attr("transform", d => "translate(" + d.x + "," + d.y + ")");
@@ -1342,7 +1358,7 @@ function fitToScreen() {
     const bounds = g.node().getBBox();
     if (bounds.width === 0 || bounds.height === 0) return;
     const parent = svg.node().clientWidth, ph = svg.node().clientHeight;
-    const scale = Math.min(0.9, 0.9 * Math.min(parent / (bounds.width+200), ph / (bounds.height+200)));
+    const scale = Math.min(1.5, Math.min(parent / (bounds.width + 120), ph / (bounds.height + 120)));
     const x0 = parent/2 - scale * (bounds.x + bounds.width/2);
     const y0 = ph/2 - scale * (bounds.y + bounds.height/2);
     svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity.translate(x0,y0).scale(scale));
