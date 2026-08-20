@@ -156,6 +156,17 @@ class CombinedGraphTests(unittest.TestCase):
         self.assertIn("getExportBg", rendered)
         self.assertIn("localStorage", rendered)
 
+    def test_rendered_html_contains_keyboard_shortcuts(self):
+        """The HTML must include keyboard shortcut handling and fitToScreen."""
+        rendered = visualizer._render_html(self.graph, "Sample charms")
+        self.assertIn("fitToScreen", rendered)
+        self.assertIn("keydown", rendered)
+        # All documented shortcuts must be present in the handler
+        for key in ('"/"', '"Escape"', '"?"', '"+"', '"-"', '"0"', '"f"', '"t"', '"h"'):
+            self.assertIn(key, rendered, f"shortcut key {key} not found in rendered HTML")
+        # Help panel must document shortcuts
+        self.assertIn("Keyboard shortcuts", rendered)
+
     def test_export_svg_xml_declaration_is_single_line(self):
         """Regression: the inline JS must not contain a literal newline inside
         the single-quoted <?xml ...?> string in exportSVG(), otherwise the

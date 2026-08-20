@@ -800,7 +800,7 @@ _HTML_TEMPLATE = Template("""<!DOCTYPE html>
       </div>
     </div>
     <div class="zoom-indicator" id="zoom-ind">100%</div>
-    <div class="hint">scroll to zoom · drag to pan · click any node for details · toggle charms or hide unconnected relations</div>
+    <div class="hint">scroll to zoom · drag to pan · click any node for details · press <b>?</b> for help · <b>/</b> to search</div>
   </div>
   <aside id="panel" class="collapsed"></aside>
 </div>
@@ -1050,6 +1050,17 @@ d3.select("#btn-help").on("click", () => {
     '<li><b>Issues</b>: the "Issues" panel lists detected integration problems (orphan endpoints, duplicate providers, limit over-subscription). Click a warning to highlight the affected nodes; click the background to clear.</li>'+
     '<li><b>Export</b>: use the ↓ SVG / ↓ PNG / ↓ JSON buttons to download the current graph (respecting charm visibility and hide-unconnected) as a self-contained SVG, PNG, or JSON file.</li>'+
     '<li><b>Theme</b>: click the ☾/☀ button to toggle between dark and light themes. Your preference is saved.</li>'+
+    '</ul>'+
+    '<h3 style="margin-top:14px">Keyboard shortcuts</h3>'+
+    '<ul>'+
+    '<li><b>/</b> — focus the search box</li>'+
+    '<li><b>Esc</b> — close panel / clear highlight</li>'+
+    '<li><b>?</b> — open this help</li>'+
+    '<li><b>+</b> / <b>-</b> — zoom in / out</li>'+
+    '<li><b>0</b> — reset zoom to 100%</li>'+
+    '<li><b>f</b> — fit graph to screen</li>'+
+    '<li><b>t</b> — toggle theme</li>'+
+    '<li><b>h</b> — toggle hide unconnected</li>'+
     '</ul>'
   );
 });
@@ -1307,21 +1318,67 @@ if (LINT_WARNINGS.length > 0) {
 }
 
 // gentle centering after a moment
-setTimeout(() => {
+function fitToScreen() {
   try {
     const bounds = g.node().getBBox();
+    if (bounds.width === 0 || bounds.height === 0) return;
     const parent = svg.node().clientWidth, ph = svg.node().clientHeight;
     const scale = Math.min(0.9, 0.9 * Math.min(parent / (bounds.width+200), ph / (bounds.height+200)));
     const x0 = parent/2 - scale * (bounds.x + bounds.width/2);
     const y0 = ph/2 - scale * (bounds.y + bounds.height/2);
     svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity.translate(x0,y0).scale(scale));
   } catch(e) {}
-}, 400);
+}
+setTimeout(fitToScreen, 400);
 
 window.addEventListener("resize", () => {
   sim.force("x", d3.forceX(W()/2).strength(0.04));
   sim.force("y", d3.forceY(H()/2).strength(0.06));
   sim.alpha(0.3).restart();
+});
+
+// ---- Keyboard shortcuts ----
+d3.select(window).on("keydown", function(event) {
+  const tag = (event.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea") {
+    if (event.key === "Escape") event.target.blur();
+    return;
+  }
+  switch (event.key) {
+    case "/":
+      event.preventDefault();
+      charmSearch.node().focus();
+      break;
+    case "Escape":
+      closePanel();
+      clearLintHighlight();
+      break;
+    case "?":
+      event.preventDefault();
+      d3.select("#btn-help").node().click();
+      break;
+    case "+": case "=":
+      svg.transition().duration(250).call(zoom.scaleBy, 1.4);
+      break;
+    case "-": case "_":
+      svg.transition().duration(250).call(zoom.scaleBy, 1/1.4);
+      break;
+    case "0":
+      svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+      sim.alpha(0.8).restart();
+      break;
+    case "f":
+      fitToScreen();
+      break;
+    case "t":
+      toggleTheme();
+      break;
+    case "h":
+      hideUnconnected = !hideUnconnected;
+      d3.select("#btn-hide-unconnected").text(hideUnconnected ? "◑ Show unconnected" : "◐ Hide unconnected");
+      updateVisibility();
+      break;
+  }
 });
 
 // ---- In-browser export (SVG / PNG / JSON) ----
